@@ -1,0 +1,17 @@
+user device
+topic write smartline/+/status
+topic write smartline/+/availability
+topic write smartline/+/ack
+topic write smartline/+/config
+topic write smartline/+/log/#
+topic read smartline/+/cmd
+topic read smartline/+/model/set
+
+user web
+topic read smartline/#
+topic write smartline/+/cmd
+topic write smartline/+/model/set
+
+user logger
+topic read smartline/+/log/record
+topic read smartline/+/status

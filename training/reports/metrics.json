@@ -1,0 +1,66 @@
+{
+  "split": "train < 2024; validation 2024; test >= 2025; horizon purged at boundaries",
+  "rows": {
+    "train": 70126,
+    "validation": 8782,
+    "test": 15310
+  },
+  "features": [
+    "temp",
+    "hum",
+    "press",
+    "lux_log",
+    "dew_point",
+    "temp_minus_dew"
+  ],
+  "input_mode": "current",
+  "proxy_lux": "shortwave_radiation * 120; calibrate with BH1750",
+  "device_warning": "No device calibration; reanalysis is not backyard sensor data.",
+  "validation_threshold": {
+    "threshold": 0.29439465680120597,
+    "recall": 0.8500237304224015,
+    "precision": 0.3079436038514443
+  },
+  "test": {
+    "roc_auc": 0.7241017271931236,
+    "pr_auc": 0.527624367232318,
+    "confusion_matrix": [
+      [
+        4872,
+        5620
+      ],
+      [
+        814,
+        4004
+      ]
+    ],
+    "reliability": [
+      [
+        0.03518211920529801,
+        0.1854521625163827,
+        0.2526997840172786,
+        0.3041307308216069,
+        0.3385370205173952,
+        0.42645074224021595,
+        0.5155161494616846,
+        0.5859938208032955,
+        0.7397260273972602,
+        1.0
+      ],
+      [
+        0.0359797472846451,
+        0.15340912968652345,
+        0.25178054252026405,
+        0.35149253441270295,
+        0.4500905290054933,
+        0.5475972570805331,
+        0.6464308815743643,
+        0.7454820521107718,
+        0.833028173178471,
+        0.9086896162824382
+      ]
+    ]
+  },
+  "baseline_auc": 0.75,
+  "meets_reference": false
+}

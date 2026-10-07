@@ -1,0 +1,16 @@
+[Unit]
+Description=Smart Clothesline MQTT Logger
+After=network-online.target
+Wants=network-online.target
+[Service]
+User=smartline
+WorkingDirectory=/opt/smartline
+EnvironmentFile=/opt/smartline/logger/.env
+ExecStart=/opt/smartline/.venv/bin/python /opt/smartline/logger/logger.py
+Restart=on-failure
+RestartSec=5
+NoNewPrivileges=true
+ProtectSystem=strict
+ReadWritePaths=/opt/smartline/data
+[Install]
+WantedBy=multi-user.target

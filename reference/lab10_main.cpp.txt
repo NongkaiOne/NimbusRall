@@ -1,0 +1,420 @@
+// =================================================================
+// Lab 8 (เดิม ไม่แก้ไข) + เพิ่มส่วน Lab 10A: Bluetooth Classic Serial (SPP)
+// ใช้คู่กับหน้าเว็บ lab10_ble_dashboard_10A_10B.html (โหมด 10A / Web Serial)
+// =================================================================
+
+#include <Arduino.h>
+#include <SPI.h>
+#include <Wire.h>
+#include <SPIFFS.h>
+#include <FS.h>
+#include <Preferences.h>
+#include <Adafruit_GFX.h>
+#include <Adafruit_SSD1306.h>
+
+// ===== เพิ่มสำหรับ Lab 10A (Bluetooth Classic) =====
+#include <BluetoothSerial.h>
+
+#if !defined(CONFIG_BT_ENABLED) || !defined(CONFIG_BLUEDROID_ENABLED)
+#error "Bluetooth Classic ไม่ได้เปิดใช้งาน - ต้องใช้บอร์ด ESP32 ดั้งเดิม (ไม่ใช่ S2/C3/S3)"
+#endif
+
+// ================= การตั้งค่าคงที่ (Constants & Pins) — เดิมจาก Lab 8 =================
+#define SCREEN_WIDTH 128
+#define SCREEN_HEIGHT 64
+Adafruit_SSD1306 display(SCREEN_WIDTH, SCREEN_HEIGHT, &Wire, -1);
+
+const int POT_PIN = 36;
+const int LED_PIN = 5;
+const int SW2_PIN = 32;
+const int SW3_PIN = 33;
+const int SW4_PIN = 34;
+
+const int PWM_CHANNEL = 0;
+const int PWM_FREQ = 5000;
+const int PWM_RESOLUTION = 8;
+
+const int DEBOUNCE_DELAY = 50;
+const int LONG_PRESS_TIME = 3000;
+const int DISPLAY_INTERVAL = 200;
+
+// ================= ตัวแปรระบบ — เดิมจาก Lab 8 =================
+Preferences preferences;
+
+bool ledState = false;
+uint8_t pwmValue = 0;
+bool loggingState = false;
+unsigned long logCount = 0;
+
+int last_sw2 = HIGH;
+int last_sw3 = HIGH;
+int last_sw4 = HIGH;
+unsigned long db_sw2 = 0;
+unsigned long db_sw3 = 0;
+unsigned long sw4_press_time = 0;
+unsigned long lastDisplayTime = 0;
+
+// =================================================================
+// ===== เพิ่มสำหรับ Lab 10A: Bluetooth Classic Serial (SPP) =====
+// =================================================================
+
+// ===== Student ID =====
+#define STUDENT_ID "6730300213"
+
+BluetoothSerial SerialBT;
+
+String BT_NAME = "ESP32-LAB10A-" + String(STUDENT_ID);
+
+const unsigned long BT_STATUS_INTERVAL = 1000;   // ส่ง JSON สถานะทุก 1 วินาที
+unsigned long lastBTStatus = 0;
+unsigned long sampleId = 0;
+String btBuffer = "";
+
+void setupBluetooth();
+void handleBluetooth();
+void processBTCommand(String cmd);
+void sendBTStatus();
+void sendBTLog();
+
+// ================= ฟังก์ชันย่อย — เดิมจาก Lab 8 (ไม่แก้ไข) =================
+
+void updateLED() {
+  if (ledState) {
+    ledcWrite(PWM_CHANNEL, 255 - pwmValue);
+  } else {
+    ledcWrite(PWM_CHANNEL, 255);
+  }
+}
+
+void appendLog() {
+  if (!loggingState) return;
+
+  File file = SPIFFS.open("/log.csv", FILE_APPEND);
+  if (file) {
+    unsigned long timeSec = millis() / 1000;
+    int currentADC = analogRead(POT_PIN);
+    float voltage = (pwmValue / 255.0) * 3.3;
+
+    char timeStr[6];
+    sprintf(timeStr, "%02lu:%02lu", (timeSec / 60), (timeSec % 60));
+
+    file.printf("%s,%d,%d,%.2f,%s\n", timeStr, currentADC, pwmValue, voltage, ledState ? "ON" : "OFF");
+    file.close();
+
+    logCount++;
+  }
+}
+
+void handleButtons() {
+  int sw2_read = digitalRead(SW2_PIN);
+  int sw3_read = digitalRead(SW3_PIN);
+  int sw4_read = digitalRead(SW4_PIN);
+
+  // --- SW2 ---
+  if (last_sw2 == HIGH && sw2_read == LOW && (millis() - db_sw2 > DEBOUNCE_DELAY)) {
+    db_sw2 = millis();
+    ledState = !ledState;
+    preferences.putBool("ledState", ledState);
+    updateLED();
+    appendLog();
+  }
+
+  // --- SW3 ---
+  if (last_sw3 == HIGH && sw3_read == LOW && (millis() - db_sw3 > DEBOUNCE_DELAY)) {
+    db_sw3 = millis();
+    int adcValue = analogRead(POT_PIN);
+    pwmValue = map(adcValue, 0, 4095, 0, 255);
+    preferences.putUChar("pwmValue", pwmValue);
+    updateLED();
+    appendLog();
+  }
+
+  // --- SW4 ---
+  if (last_sw4 == HIGH && sw4_read == LOW) {
+    sw4_press_time = millis();
+  } else if (last_sw4 == LOW && sw4_read == HIGH) {
+    unsigned long pressDuration = millis() - sw4_press_time;
+
+    if (pressDuration >= LONG_PRESS_TIME) {
+      SPIFFS.remove("/log.csv");
+      File file = SPIFFS.open("/log.csv", FILE_WRITE);
+      if(file) {
+        file.println("Time,ADC,PWM,Voltage,LED_State");
+        file.close();
+      }
+      logCount = 0;
+    } else if (pressDuration > DEBOUNCE_DELAY) {
+      loggingState = !loggingState;
+    }
+  }
+
+  last_sw2 = sw2_read;
+  last_sw3 = sw3_read;
+  last_sw4 = sw4_read;
+}
+
+void handleSerialCommand() {
+  if (Serial.available() > 0) {
+    char cmd = Serial.read();
+    if (cmd == 'R' || cmd == 'r') {
+      File file = SPIFFS.open("/log.csv", FILE_READ);
+      if (file) {
+        Serial.println("======================================");
+        Serial.println("               log.csv");
+        Serial.println("======================================");
+
+        while (file.available()) {
+          Serial.write(file.read());
+        }
+        file.close();
+
+        Serial.println("======================================");
+        Serial.printf("Total Records : %lu\n", logCount);
+        Serial.println("======================================");
+      } else {
+        Serial.println("Press R to read /log.csv");
+      }
+    }
+  }
+}
+
+void updateOLED() {
+  unsigned long runTimeSec = millis() / 1000;
+  char timeStr[6];
+  sprintf(timeStr, "%02lu:%02lu", (runTimeSec / 60), (runTimeSec % 60));
+
+  int currentADC = analogRead(POT_PIN);
+  float voltage = (pwmValue / 255.0) * 3.3;
+
+  display.clearDisplay();
+
+  display.setCursor(0, 0);
+  display.printf("%s       POT:%04d", timeStr, currentADC);
+
+  display.setCursor(0, 16);
+  display.printf("PWM SAVE: %3d(%.2fV)", pwmValue, voltage);
+
+  display.setCursor(0, 32);
+  display.printf("LED Status: %s", ledState ? "ON" : "OFF");
+
+  display.setCursor(0, 48);
+  display.printf("LOG:%s count:%lu", loggingState ? "ON " : "OFF", logCount);
+
+  display.display();
+}
+
+// ================= ส่วนตั้งค่าระบบ (Setup) — เดิมจาก Lab 8 + เพิ่ม Bluetooth =================
+void setup() {
+  Serial.begin(115200);
+
+  pinMode(SW2_PIN, INPUT_PULLUP);
+  pinMode(SW3_PIN, INPUT_PULLUP);
+  pinMode(SW4_PIN, INPUT_PULLUP);
+
+  ledcSetup(PWM_CHANNEL, PWM_FREQ, PWM_RESOLUTION);
+  ledcAttachPin(LED_PIN, PWM_CHANNEL);
+
+  if (!display.begin(SSD1306_SWITCHCAPVCC, 0x3C)) {
+    Serial.println(F("SSD1306 allocation failed"));
+  }
+  display.clearDisplay();
+  display.setTextColor(SSD1306_WHITE);
+  display.setTextSize(1);
+
+  preferences.begin("ledPref", false);
+
+  ledState = preferences.getBool("ledState", false);
+  pwmValue = preferences.getUChar("pwmValue", 0);
+  updateLED();
+
+  if (!SPIFFS.begin(true)) {
+    Serial.println("SPIFFS Mount Failed");
+    return;
+  }
+
+  if (!SPIFFS.exists("/log.csv")) {
+    File file = SPIFFS.open("/log.csv", FILE_WRITE);
+    if(file) {
+      file.println("Time,ADC,PWM,Voltage,LED_State");
+      file.close();
+    }
+    logCount = 0;
+  } else {
+    File file = SPIFFS.open("/log.csv", FILE_READ);
+    if(file) {
+      file.readStringUntil('\n');
+      while (file.available()) {
+        String line = file.readStringUntil('\n');
+        line.trim();
+        if (line.length() > 0) logCount++;
+      }
+      file.close();
+    }
+  }
+
+  // ---------------- เพิ่มสำหรับ Lab 10A: Bluetooth Classic ----------------
+
+  setupBluetooth();
+
+  Serial.println();
+  Serial.println("===== LAB 10A READY =====");
+}
+
+// ================= ส่วนการทำงานหลัก (Loop) — เดิมจาก Lab 8 + เพิ่ม Bluetooth =================
+void loop() {
+  handleButtons();
+  handleSerialCommand();
+
+  if (millis() - lastDisplayTime > DISPLAY_INTERVAL) {
+    updateOLED();
+    lastDisplayTime = millis();
+  }
+
+  // ---------------- เพิ่มสำหรับ Lab 10A ----------------
+
+  handleBluetooth();
+
+  if (millis() - lastBTStatus >= BT_STATUS_INTERVAL) {
+    lastBTStatus = millis();
+    sendBTStatus();
+  }
+}
+
+// =================================================================
+// ===== ฟังก์ชันเพิ่มเติมสำหรับ Lab 10A (Bluetooth Classic SPP) =====
+// =================================================================
+
+void setupBluetooth() {
+
+  if (!SerialBT.begin(BT_NAME)) {
+    Serial.println("Bluetooth init failed");
+    return;
+  }
+
+  Serial.println();
+  Serial.println("===== BLUETOOTH CLASSIC (SPP) =====");
+  Serial.print("Device name: ");
+  Serial.println(BT_NAME);
+  Serial.println("Pair ESP32 with the computer, then press Connect on the dashboard (10A)");
+}
+
+// อ่านคำสั่งทีละบรรทัดจาก Bluetooth (ไม่ block loop)
+void handleBluetooth() {
+
+  while (SerialBT.available()) {
+    char c = (char)SerialBT.read();
+
+    if (c == '\n') {
+      processBTCommand(btBuffer);
+      btBuffer = "";
+    } else if (c != '\r') {
+      if (btBuffer.length() < 64) btBuffer += c;
+    }
+  }
+}
+
+// คำสั่ง: READ, LED 1/0, PWM n, LOG 1/0, SAVE, READLOG, DELLOG
+void processBTCommand(String cmd) {
+
+  cmd.trim();
+  cmd.toUpperCase();
+
+  if (cmd.length() == 0) return;
+
+  Serial.print("BT CMD: ");
+  Serial.println(cmd);
+
+  if (cmd == "READ") {
+    // ส่งสถานะด้านล่าง
+
+  } else if (cmd.startsWith("LED")) {
+    ledState = cmd.substring(3).toInt() != 0;
+    updateLED();
+
+  } else if (cmd.startsWith("PWM")) {
+    int value = cmd.substring(3).toInt();
+    pwmValue = constrain(value, 0, 255);
+    updateLED();
+
+  } else if (cmd.startsWith("LOG ")) {
+    loggingState = cmd.substring(4).toInt() != 0;
+
+  } else if (cmd == "SAVE") {
+    preferences.putBool("ledState", ledState);
+    preferences.putUChar("pwmValue", pwmValue);
+
+  } else if (cmd == "READLOG") {
+    sendBTLog();
+    return;
+
+  } else if (cmd == "DELLOG") {
+    SPIFFS.remove("/log.csv");
+    File file = SPIFFS.open("/log.csv", FILE_WRITE);
+    if (file) {
+      file.println("Time,ADC,PWM,Voltage,LED_State");
+      file.close();
+    }
+    logCount = 0;
+
+  } else {
+    Serial.println("Unknown BT command");
+    return;
+  }
+
+  // ตอบกลับด้วยสถานะล่าสุดทันที เพื่อให้หน้าเว็บอัปเดต
+  sendBTStatus();
+}
+
+// ส่งสถานะเป็น JSON 1 บรรทัด ตามรูปแบบที่ Dashboard 10A ต้องการ
+void sendBTStatus() {
+
+  if (!SerialBT.hasClient()) return;
+
+  int currentADC = analogRead(POT_PIN);
+  bool savedLED = preferences.getBool("ledState", false);
+  uint8_t savedPWM = preferences.getUChar("pwmValue", 0);
+
+  sampleId++;
+
+  String json = "{";
+  json += "\"adc\":" + String(currentADC);
+  json += ",\"pwm\":" + String(pwmValue);
+  json += ",\"led\":" + String(ledState ? "true" : "false");
+  json += ",\"logging\":" + String(loggingState ? "true" : "false");
+  json += ",\"savedLED\":" + String(savedLED ? "true" : "false");
+  json += ",\"savedPWM\":" + String(savedPWM);
+  json += ",\"logCount\":" + String(logCount);
+  json += ",\"uptimeSeconds\":" + String(millis() / 1000);
+  json += ",\"sampleId\":" + String(sampleId);
+  json += "}";
+
+  SerialBT.println(json);
+
+  Serial.println(json);
+}
+
+// ส่ง /log.csv ผ่าน Bluetooth: LOG_BEGIN ... แต่ละบรรทัดของไฟล์ ... LOG_END
+void sendBTLog() {
+
+  if (!SerialBT.hasClient()) return;
+
+  File file = SPIFFS.open("/log.csv", FILE_READ);
+
+  SerialBT.println("LOG_BEGIN");
+
+  if (file) {
+    while (file.available()) {
+      String line = file.readStringUntil('\n');
+      line.trim();
+
+      if (line.length() > 0) {
+        SerialBT.println(line);
+        delay(5);   // ให้ buffer Bluetooth ส่งทัน
+      }
+    }
+    file.close();
+  }
+
+  SerialBT.println("LOG_END");
+  SerialBT.flush();
+}
