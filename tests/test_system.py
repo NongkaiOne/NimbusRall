@@ -1,3 +1,4 @@
+# ภาพรวม: ทดสอบ feature ความตรงกันของโมเดล Python/C++ และการเก็บ log ฝั่งคอม
 import csv,importlib.util,json,random,subprocess,sys,tempfile,unittest
 from pathlib import Path
 import numpy as np

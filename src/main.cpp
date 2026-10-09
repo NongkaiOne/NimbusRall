@@ -1,6 +1,8 @@
+// ภาพรวม: จุดเริ่มเฟิร์มแวร์ รวมการวัดค่า ทำนายฝน ตัดสินใจควบคุมราว และรับคำสั่ง Serial/เครือข่าย
 #include "app.h"
 #include <errno.h>
 #include <esp_system.h>
+// สถานะกลางที่หลายโมดูลใช้ร่วมกัน: ค่าตั้ง ตัวอย่างล่าสุด โหมด และโอกาสฝน
 Settings settings;Preferences prefs;Sample current;
 Line lineState=UNKNOWN;bool autoMode=true,fallback=true,sensorError=true;
 uint32_t nextMeasure=0,manualUntil=0,seqHigh=0;float probability=.1;
@@ -13,7 +15,9 @@ static bool sequenceNumber(const String& s,uint32_t& v){
   if(!s.length())return false;for(unsigned i=0;i<s.length();i++)if(s[i]<'0'||s[i]>'9')return false;
   errno=0;char* end;unsigned long n=strtoul(s.c_str(),&end,10);if(errno||*end||n==UINT32_MAX)return false;v=n;return true;
 }
+// เข้า Manual ชั่วคราว และตั้งเวลาที่จะกลับ Auto ตาม manual_timeout_s
 static void manual(){autoMode=false;manualUntil=millis()+uint32_t(settings.manual_timeout_s*1000);dryRounds=0;}
+// รับคำสั่งร่วมจาก Serial/เครือข่าย ตรวจรูปแบบ เรียกโมดูลที่เกี่ยวข้อง แล้วส่ง ACK
 void processCommand(String cmd){
   cmd.trim();bool ok=true;String msg="ok";
 #ifdef SMARTLINE_NO_SERVO
@@ -47,8 +51,10 @@ void processCommand(String cmd){
   else {ok=false;msg="unknown command";}
   ack(cmd,ok,msg);publishStatus();
 }
+// กฎ Auto: เก็บเมื่อฝนถึงเกณฑ์; กางเมื่อโอกาสฝนต่ำและแสงพอสองรอบติดกัน
 static void decide(){
   if(!autoMode)return;
+  // เซ็นเซอร์ผิดพลาดเกินสองรอบ ให้พยายามเก็บราวเมื่อสถานะตำแหน่งใช้ได้
   if(sensorError){dryRounds=0;if(++errorRounds>2&&lineState!=UNKNOWN&&lineState!=FAULT_TIMEOUT){motorMove(false);lastAction=1;}return;}
   errorRounds=0;
   if(lineState==UNKNOWN||lineState==FAULT_TIMEOUT)return;
@@ -57,6 +63,7 @@ static void decide(){
     if(++dryRounds>=2&&lineState!=EXTENDED&&lineState!=MOVING_OUT){motorMove(true);lastAction=2;}
   }else dryRounds=0;
 }
+// ทำครั้งเดียว: โหลดค่าตั้ง → servo/storage/model/sensors/network → เริ่มรอบวัด
 void setup(){
   Serial.begin(115200);delay(2000);
   Serial.printf("[BOOT] Reset reason: %d (brownout=%d)\n", int(esp_reset_reason()), int(ESP_RST_BROWNOUT));
@@ -80,6 +87,7 @@ void setup(){
   Serial.println("Smart Clothesline: RETRACT first; then MODE AUTO. Commands via Serial or MQTT.");
 #endif
 }
+// วนบริการแต่ละโมดูลทีละส่วน เพื่อรับเครือข่ายและ STOP ระหว่างรอวัด/ทำนายได้
 void loop(){
   if(motorTick())publishStatus();networkTick();storeTick();
   uint32_t now=millis();if(rebootAt&&due(now,rebootAt))ESP.restart();
@@ -92,10 +100,12 @@ void loop(){
     else {fallback=true;probability=.1;fault="sensor_err";}
     if(!ok){measuring=false;decide();if(!logAppend(lastAction))fault="log_write_failed";lastAction=0;publishStatus();}
   }
+  // ทำนายเสร็จจึงตัดสินใจ บันทึกผล และเผยแพร่สถานะของรอบนี้
   if(predicting&&predictionTick(probability,fallback)){
     predicting=measuring=false;decide();if(!logAppend(lastAction))fault="log_write_failed";lastAction=0;publishStatus();
   }
   if(due(now,heartbeatAt)){heartbeatAt=now+uint32_t(settings.heartbeat_s*1000);publishStatus();}
+  // รับ Serial ทีละบรรทัด จำกัดขนาดและงานต่อรอบเพื่อไม่ค้าง loop
   for(int i=0;i<64&&Serial.available();i++){
     char c=Serial.read();if(c=='\n'){processCommand(serialBuffer);serialBuffer="";}
     else if(c!='\r'){if(serialBuffer.length()<256)serialBuffer+=c;else serialBuffer="";}

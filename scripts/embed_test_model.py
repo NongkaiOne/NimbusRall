@@ -1,3 +1,4 @@
+# ภาพรวม: ขั้นก่อน build ของ PlatformIO แปลง model.json เป็น header สำหรับทดสอบโมเดลออฟไลน์
 from pathlib import Path
 import json
 Import("env")

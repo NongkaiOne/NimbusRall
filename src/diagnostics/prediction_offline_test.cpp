@@ -1,3 +1,4 @@
+// ภาพรวม: ทดสอบเซ็นเซอร์และโมเดลที่ฝังในโปรแกรมแบบออฟไลน์ ใช้ประวัติใน RAM แทน LittleFS
 #ifdef PREDICTION_OFFLINE_TEST
 #include "app.h"
 #include "test_model.h"
@@ -24,6 +25,7 @@ static void saveSample(){
   r.press_x10=lroundf(sample.press*10);r.lux_x10=lroundf(sample.lux*10);
   historyRows[r.seq%CAPACITY]=r;lastStored=sample.epoch;
 }
+// เตรียม Serial และอุปกรณ์เฉพาะชุดทดสอบนี้ ทำครั้งเดียวหลังบูต
 void setup(){
   Serial.begin(115200);delay(200);
   Serial.println("OFFLINE TRAINED MODEL TEST: no Wi-Fi, no servo");
@@ -35,6 +37,7 @@ void setup(){
   Serial.println(modelUsesCurrentOnly()?"CURRENT INPUTS: predict immediately, then every 30 minutes; MEASURE for manual test. No clock/history required.":"History model: send TIME <Unix seconds>; needs about 3 hours.");
   sensorsBegin();
 }
+// ทำงานทดสอบซ้ำและพิมพ์ผลใน Serial Monitor เพื่อดูค่าจริง/อาการผิดปกติ
 void loop(){
   while(Serial.available()){
     char ch=Serial.read();

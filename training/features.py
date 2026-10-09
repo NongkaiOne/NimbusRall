@@ -1,3 +1,4 @@
+# ภาพรวม: เตรียมข้อมูลและสร้าง feature แบบเดียวกับ ESP32 โดยใช้ข้อมูลปัจจุบัน/อดีตเป็นอินพุต
 """Causal feature definitions shared with include/features.h."""
 import math
 import numpy as np
@@ -7,6 +8,7 @@ FEATURES = ['temp', 'hum', 'press', 'lux_log', 'dew_point', 'temp_minus_dew',
             'd_press_1h', 'd_press_3h', 'd_hum_1h', 'd_temp_1h', 'lux_ratio',
             'hour_sin', 'hour_cos', 'doy_sin', 'doy_cos', 'press_std_3h']
 
+# สูตรหนึ่งแถว ต้องตรงกับ featureVector ใน include/features.h
 def vector(temp, hum, press, lux, hour, doy, dp1=0, dp3=0, dh1=0, dt1=0, ratio=.5, press_std=0):
     g = math.log(max(.01, hum)/100) + 17.62*temp/(243.12+temp)
     dew = 243.12*g/(17.62-g)
@@ -26,6 +28,7 @@ def load_history(path, light=None):
             other[['time','shortwave_radiation']], on='time', validate='one_to_one')
     return df
 
+# ตรวจข้อมูลรายชั่วโมงต่อเนื่อง และแปลงรังสีแสงเป็น lux โดยประมาณสำหรับฝึก
 def prepare(df):
     df = df.copy(); df['time'] = pd.to_datetime(df['time'])
     df = df.sort_values('time').set_index('time')
@@ -36,6 +39,7 @@ def prepare(df):
     df['lux'] = df.shortwave_radiation.clip(lower=0)*120
     return feature_frame(df), df
 
+# สร้าง feature จากปัจจุบัน/อดีต ไม่ใช้ฝนในอนาคตเป็นอินพุต
 def feature_frame(df):
     x = pd.DataFrame(index=df.index)
     for k in ['temp','hum','press']: x[k]=df[k]
@@ -53,6 +57,7 @@ def feature_frame(df):
     x['press_std_3h']=df.press.rolling('3h',closed='both',min_periods=1).std(ddof=0)
     return x[FEATURES]
 
+# ใช้ฝนในอนาคตเป็นคำตอบสำหรับฝึก แยกออกจาก feature
 def future_labels(rain,horizon,step_hours=1):
     n=int(horizon/step_hours)
     if n<1 or n*step_hours!=horizon: raise ValueError('Invalid horizon')

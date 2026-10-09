@@ -1,11 +1,11 @@
 {
-  "name": "NimbusRall",
-  "short_name": "NimbusRall",
+  "name": "NimbusRail",
+  "short_name": "NimbusRail",
   "start_url": ".",
   "display": "standalone",
   "background_color": "#f5f7f3",
   "theme_color": "#146c59",
-  "description": "NimbusRall app preview",
+  "description": "NimbusRail app preview",
   "orientation": "portrait-primary",
   "prefer_related_applications": false,
   "icons": [

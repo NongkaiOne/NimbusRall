@@ -1,3 +1,4 @@
+// ภาพรวม: เก็บประวัติใน LittleFS แบบวนทับเมื่อเต็ม ใช้ CRC และข้อมูลสองชุดต่อช่องตรวจการเขียนไม่ครบ
 #include "app.h"
 #include <stddef.h>
 // Each logical slot has two CRC-protected generations. Torn writes leave the other valid.
@@ -10,6 +11,7 @@ uint32_t crc32Update(uint32_t c,const String& s){return crcBytes((const uint8_t*
 static uint16_t crc16(const LogRecord& r){uint16_t c=0xffff;auto b=(const uint8_t*)&r;for(size_t i=0;i<offsetof(LogRecord,crc16);i++){c^=uint16_t(b[i])<<8;for(int k=0;k<8;k++)c=(c<<1)^((c&0x8000)?0x1021:0);}return c;}
 static bool slotRead(File& f,uint32_t index,Slot& s){return f.seek(index*sizeof(Slot))&&f.read((uint8_t*)&s,sizeof(s))==sizeof(s)&&s.r.seq&&s.r.crc16==crc16(s.r)&&s.crc==~crcBytes((uint8_t*)&s,offsetof(Slot,crc));}
 static bool best(File& f,uint32_t seq,Slot& s,int& side){Slot a,b;uint32_t ix=(seq%LOG_CAPACITY)*2;bool av=slotRead(f,ix,a),bv=slotRead(f,ix+1,b);if(!av&&!bv)return false;side=(!av||(bv&&b.revision>a.revision))?1:0;s=side?b:a;return true;}
+// เปิด LittleFS โดยไม่ format อัตโนมัติ และกู้ข้อมูลลำดับ log จากรายการที่ CRC ผ่าน
 bool storeBegin(){
   ready=LittleFS.begin(false);if(!ready){fault="filesystem_mount: use uploadfs once";return false;}
   seqHigh=prefs.getUInt("seqHigh",0);oldest=prefs.getUInt("floor",1);
@@ -21,12 +23,14 @@ bool storeBegin(){
 }
 uint32_t logCount(){return count;}uint32_t logOldest(){return oldest;}
 bool logRead(uint32_t seq,LogRecord& r){if(!ready||seq<oldest||seq>seqHigh)return false;File f=LittleFS.open("/records.bin","r");Slot s;int side;bool ok=f&&best(f,seq,s,side)&&s.r.seq==seq;f.close();if(ok)r=s.r;return ok;}
+// เขียนอีกฝั่งของช่องพร้อม revision ใหม่ เพื่อเหลือชุดเดิมหากชุดใหม่เขียนไม่ครบ
 static bool writeRecord(LogRecord r){
   File f=LittleFS.open("/records.bin",LittleFS.exists("/records.bin")?"r+":"w+");if(!f)return false;
   Slot prev={},s={};int side=1;bool exists=best(f,r.seq,prev,side);
   s.revision=exists?prev.revision+1:1;s.r=r;s.r.crc16=crc16(s.r);s.crc=~crcBytes((uint8_t*)&s,offsetof(Slot,crc));
   bool ok=f.seek(((r.seq%LOG_CAPACITY)*2+(1-side))*sizeof(Slot))&&f.write((uint8_t*)&s,sizeof(s))==sizeof(s);f.flush();f.close();return ok;
 }
+// แปลงค่ารอบล่าสุดเป็น LogRecord และเลื่อนลำดับหลังเขียนสำเร็จ
 bool logAppend(uint8_t action){
   if(!ready||seqHigh==UINT32_MAX)return false;
   LogRecord r={};r.seq=seqHigh+1;r.epoch=current.epoch;r.uptime_s=current.uptime;
@@ -37,6 +41,7 @@ bool logAppend(uint8_t action){
   if(count<LOG_CAPACITY)count++;oldest=max(oldest,seqHigh>=LOG_CAPACITY?seqHigh-LOG_CAPACITY+1:1u);return true;
 }
 bool logLabel(uint32_t seq,int label){LogRecord r;if(!logRead(seq,r)||label<0||label>1)return false;r.rain_label=label;return writeRecord(r);}
+// เมื่อได้เวลา NTP เติมเวลาให้ log ของการบูตครั้งนี้จาก uptime ไม่เดาเวลาของการบูตเก่า
 void storeTick(){
   // Only this boot has a trustworthy uptime anchor. Never invent timestamps for older boots.
   if(!ready||!epochNow()||readlogBusy()||backfillNext>seqHigh)return;
@@ -46,7 +51,9 @@ void storeTick(){
     if(writeRecord(r))publish("log/record",logCsv(r));else fault="log_backfill_failed";
   }
 }
+// ลบประวัติและเลื่อนขอบเขตเริ่มต้น แต่ไม่ย้อน seq เพื่อแยกข้อมูลใหม่จากเก่า
 bool logDelete(){if(!ready)return false;if(!prefs.putUInt("floor",seqHigh+1))return false;oldest=seqHigh+1;count=0;return !LittleFS.exists("/records.bin")||LittleFS.remove("/records.bin");}
+// แปลงไบนารีเป็นทศนิยม/CSV ถ้าเซ็นเซอร์ผิดพลาดปล่อยช่องวัดว่าง
 String logCsv(const LogRecord& r){
   String s=String(r.seq)+","+String(r.epoch)+",";
   if(r.flags&1)s+=",,,,";else s+=String(r.temp_x100/100.f,2)+","+String(r.hum_x100/100.f,2)+","+String(r.press_x10/10.f,1)+","+String(r.lux_x10/10.f,1)+",";

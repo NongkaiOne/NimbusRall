@@ -1,3 +1,4 @@
+// ภาพรวม: ตัวจับคู่บอร์ดของ Blaze เดิม ไม่ใช้กับ Spark; ปัจจุบันใช้ scripts/configure_firebase_device.py
 "use strict";
 const {initializeApp,applicationDefault}=require("firebase-admin/app");
 const {getAuth}=require("firebase-admin/auth");

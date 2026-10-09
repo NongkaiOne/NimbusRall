@@ -1,0 +1,9 @@
+{
+  "apiKey": "YOUR_WEB_API_KEY",
+  "appId": "YOUR_WEB_APP_ID",
+  "messagingSenderId": "YOUR_SENDER_ID",
+  "projectId": "YOUR_PROJECT_ID",
+  "authDomain": "YOUR_PROJECT_ID.firebaseapp.com",
+  "databaseURL": "https://YOUR_PROJECT_ID-default-rtdb.asia-southeast1.firebasedatabase.app",
+  "vapidKey": "YOUR_WEB_PUSH_PUBLIC_KEY"
+}

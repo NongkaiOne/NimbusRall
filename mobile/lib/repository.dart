@@ -1,16 +1,13 @@
+// ภาพรวม: ตัวกลางข้อมูลของหน้าจอ แยก Firebase จริงออกจากข้อมูลจำลองด้วย interface เดียวกัน
 import 'dart:async';
-import 'dart:convert';
 
-import 'package:flutter/foundation.dart';
-
-import 'package:cloud_functions/cloud_functions.dart';
-import 'package:crypto/crypto.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:firebase_database/firebase_database.dart';
-import 'package:firebase_messaging/firebase_messaging.dart';
 
 import 'models.dart';
+import 'push_notifications.dart';
 
+// สัญญาของแหล่งข้อมูล ให้หน้าจอใช้ Firebase หรือ Demo ได้เหมือนกัน
 abstract class DeviceRepository {
   bool get demo;
   String get uid;
@@ -25,22 +22,14 @@ abstract class DeviceRepository {
   Future<void> dispose();
 }
 
+// เชื่อม Database ด้วยบัญชีเจ้าของและดูแล Push ของบัญชีนั้น
 class FirebaseRepository implements DeviceRepository {
   FirebaseRepository(this.user) {
-    FirebaseMessaging.instance
-        .getNotificationSettings()
-        .then((settings) async {
-          if (settings.authorizationStatus == AuthorizationStatus.authorized ||
-              settings.authorizationStatus == AuthorizationStatus.provisional) {
-            await enableNotifications();
-          }
-        })
-        .catchError((Object _) {});
+    unawaited(_push.restore());
   }
+  late final _push = PushRegistration(user.uid);
   final User user;
   final _db = FirebaseDatabase.instance;
-  StreamSubscription<String>? _tokenRefresh;
-  String? _tokenKey;
   @override
   bool get demo => false;
   @override
@@ -59,82 +48,85 @@ class FirebaseRepository implements DeviceRepository {
   @override
   Stream<Json> state(String id) => _watch('devices/$id/telemetry');
   @override
-  Stream<Json> control(String id) => _watch('devices/$id/control');
-  @override
   Stream<List<Json>> logs(String id, int limit) =>
       _list(_db.ref('devices/$id/logs').orderByKey().limitToLast(limit));
   @override
   Stream<List<Json>> alerts(String id) => _list(
     _db.ref('devices/$id/alerts').orderByChild('createdAt').limitToLast(100),
   );
+
+  // The owner writes an immutable request; only the device can write its ACK.
+  // Subscribe to one ACK rather than downloading the whole command history.
   @override
+  // ติดตาม control และ ACK ของคำสั่งปัจจุบัน ไม่โหลดประวัติ ACK ทั้งหมด
+  Stream<Json> control(String id) {
+    late StreamController<Json> stream;
+    StreamSubscription<Json>? requestSub, ackSub;
+    String? active;
+    int generation = 0;
+    stream = StreamController<Json>(
+      onListen: () {
+        requestSub = _watch('devices/$id/control').listen((request) {
+          active = request['id'] as String?;
+          final version = ++generation;
+          ackSub?.cancel();
+          stream.add(request);
+          if (active != null) {
+            ackSub = _watch('devices/$id/acks/$active').listen((ack) {
+              if (version == generation && !stream.isClosed) {
+                stream.add({
+                  ...request,
+                  if (ack['id'] == active) ...{
+                    'status': ack['ok'] == true ? 'accepted' : 'rejected',
+                    'ack': ack,
+                  },
+                });
+              }
+            }, onError: stream.addError);
+          }
+        }, onError: stream.addError);
+      },
+      onCancel: () async {
+        generation++;
+        await requestSub?.cancel();
+        await ackSub?.cancel();
+      },
+    );
+    return stream.stream;
+  }
+
+  @override
+  // สร้างคำสั่ง ID ใหม่ อายุประมาณ 25 วินาที Rules ตรวจสิทธิ์และสถานะซ้ำที่เซิร์ฟเวอร์
   Future<void> command(String id, String action) async {
-    await FirebaseFunctions.instanceFor(region: 'asia-southeast1')
-        .httpsCallable('issueCommand')
-        .call({'deviceId': id, 'action': action});
-  }
-
-  Future<void> _saveToken(String token) async {
-    final key = sha256.convert(utf8.encode(token)).toString();
-    await _db.ref('users/$uid/pushTokens/$key').set({
-      'token': token,
+    final offset = (await _db.ref('.info/serverTimeOffset').get()).value;
+    final now =
+        DateTime.now().millisecondsSinceEpoch +
+        (offset is num ? offset.toInt() : 0);
+    final commandId = _db.ref('devices/$id/acks').push().key!;
+    // Rules recheck ownership, online status, allowed action, servo state and pending requests atomically.
+    await _db.ref('devices/$id/control').set({
+      'id': commandId,
+      'action': action,
+      'requestedBy': uid,
       'createdAt': ServerValue.timestamp,
+      'expiresAt': now + 25000,
+      'status': 'pending',
     });
-    if (_tokenKey != null && _tokenKey != key) {
-      await _db.ref('users/$uid/pushTokens/$_tokenKey').remove();
-    }
-    _tokenKey = key;
   }
 
   @override
-  Future<String> enableNotifications() async {
-    final messaging = FirebaseMessaging.instance;
-    final permission = await messaging.requestPermission();
-    if (permission.authorizationStatus == AuthorizationStatus.denied) {
-      return 'ยังไม่ได้อนุญาตแจ้งเตือน เปิดสิทธิ์ได้ในการตั้งค่ามือถือ';
-    }
-    if (defaultTargetPlatform == TargetPlatform.iOS &&
-        await messaging.getAPNSToken() == null) {
-      return 'กำลังรอการลงทะเบียนจาก Apple กรุณาลองอีกครั้ง';
-    }
-    final token = await messaging.getToken();
-    if (token == null) return 'ยังลงทะเบียนแจ้งเตือนไม่สำเร็จ กรุณาลองอีกครั้ง';
-    await _saveToken(token);
-    await _tokenRefresh?.cancel();
-    _tokenRefresh = messaging.onTokenRefresh.listen((value) {
-      // A later manual registration can recover a transient network failure.
-      _saveToken(value).catchError((Object _) {});
-    });
-    return 'เปิดแจ้งเตือนฝนแล้ว';
-  }
-
+  Future<String> enableNotifications() => _push.enable();
   @override
   Future<void> signOut() async {
-    // Remove this phone before signing out so another user cannot receive its alerts.
-    await _tokenRefresh?.cancel();
-    final appleNotReady =
-        defaultTargetPlatform == TargetPlatform.iOS &&
-        await FirebaseMessaging.instance.getAPNSToken() == null;
-    final token =
-        _tokenKey ??
-        (appleNotReady
-            ? null
-            : await FirebaseMessaging.instance.getToken().then(
-                (t) => t == null
-                    ? null
-                    : sha256.convert(utf8.encode(t)).toString(),
-              ));
-    if (token != null) await _db.ref('users/$uid/pushTokens/$token').remove();
-    if (!appleNotReady) await FirebaseMessaging.instance.deleteToken();
+    await _push.signOut();
     await FirebaseAuth.instance.signOut();
   }
 
   @override
-  Future<void> dispose() async {
-    await _tokenRefresh?.cancel();
-  }
+  Future<void> dispose() => _push.dispose();
 }
 
+// ข้อมูลและคำสั่งจำลองในเครื่อง ไม่เชื่อมบอร์ดจริง
 class DemoRepository implements DeviceRepository {
   DemoRepository() {
     _heartbeat = Timer.periodic(

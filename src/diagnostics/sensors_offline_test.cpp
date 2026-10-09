@@ -1,3 +1,4 @@
+// ภาพรวม: ทดสอบ BME280 + BH1750 แบบออฟไลน์ พร้อมนับครั้งที่อ่านผ่าน/ไม่ผ่าน
 #ifdef SENSORS_OFFLINE_TEST
 #include <Arduino.h>
 #include <Wire.h>
@@ -16,6 +17,7 @@ static bool startLight() {
   return Wire.endTransmission() == 0;
 }
 
+// เตรียม Serial และอุปกรณ์เฉพาะชุดทดสอบนี้ ทำครั้งเดียวหลังบูต
 void setup() {
   Serial.begin(115200);
   delay(200);
@@ -41,6 +43,7 @@ void setup() {
   delay(200);
 }
 
+// ทำงานทดสอบซ้ำและพิมพ์ผลใน Serial Monitor เพื่อดูค่าจริง/อาการผิดปกติ
 void loop() {
   Serial.printf("Uptime: %lu ms\n", (unsigned long)millis());
   if (bmeOk) {

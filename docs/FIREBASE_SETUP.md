@@ -1,89 +1,189 @@
-# ตั้งค่า NimbusRall: แอพ + Firebase + ESP32
+# ตั้งค่า NimbusRail ด้วย Firebase Spark
 
-โค้ดแอพอยู่ใน mobile/ ใช้ร่วมกันสำหรับ Android และ iOS เฟิร์มแวร์ Firebase มี environment แยกจาก MQTT เดิม
+ชื่อที่แสดงของโปรเจกต์คือ **NimbusRail** ส่วน **Project ID** ให้คัดลอกจาก Firebase Console ตามจริง ไม่จำเป็นต้องตรงกับชื่อแสดง
 
-ระบบที่ทดสอบฮาร์ดแวร์ไว้ก่อนหน้านี้ยังเป็นแบบไม่มี servo การเพิ่ม Firebase รอบนี้ยังไม่ได้เปลี่ยนเฟิร์มแวร์บนบอร์ด และยังไม่ได้ทดสอบ push notification บนโทรศัพท์จริง
+อัปเดต 9 ตุลาคม 2026: โค้ดปัจจุบันใช้ **Spark** ส่งข้อมูลและคำสั่งตรงกับ Realtime Database
+**ไม่ต้องเปิด Blaze ไม่ต้องผูกบัตร และไม่ต้อง deploy Cloud Functions**
 
-## 1. สร้าง Firebase project
+```text
+ESP32 ── Firebase Auth + HTTPS ── Realtime Database ── แอพ Flutter
+                               สถานะ / logs / alerts / control / acks
+```
 
-ใน Firebase Console:
+แอพดูเซ็นเซอร์ ผลทำนาย ประวัติ และสั่ง Manual ได้ รวมถึง **Push เมื่อปิดแท็บเว็บหรือแอพอยู่เบื้องหลัง** หลังตั้งค่า FCM และเปิดตัวส่งบนคอมหรือเซิร์ฟเวอร์ ดู [คู่มือ Push Notification](PUSH_NOTIFICATIONS.md) หากยังไม่ตั้งค่า Push จะมีข้อความเตือนขณะเปิดแอพและเก็บประวัติตามเดิม
 
-1. เลือกหรือสร้าง project จด **Project ID**
-2. เปิด Authentication → Sign-in method → Email/Password
-3. สร้างผู้ใช้ใน Authentication → Users และจด **UID** ของผู้ใช้เจ้าของบอร์ด
-4. สร้าง Realtime Database ใน **asia-southeast1 (Singapore)** ด้วย locked mode จด Database URL เช่น https://PROJECT-default-rtdb.asia-southeast1.firebasedatabase.app
-5. เปิดแผน Blaze เพื่อ deploy Cloud Functions และตั้งงบประมาณแจ้งเตือนค่าใช้จ่าย
+Spark มีโควตาฟรี ไม่ใช่ไม่จำกัด ตรวจปริมาณข้อมูลที่แท็บ Usage ของ Firebase ตาม [ราคาทางการ](https://firebase.google.com/pricing)
 
-เฟิร์มแวร์ส่ง HTTPS ประมาณทุก 5 วินาทีหลังคำขอก่อนหน้าจบ และลดความถี่เมื่อผิดพลาด การ polling และ trigger มีค่าใช้งานตาม Firebase/Google Cloud อย่าถือว่าเปิดทิ้งไว้แล้วฟรี ไม่จำเป็นต้องเปิด Analytics สำหรับงานนี้
+## 1. เลือกโปรเจกต์และคงแผน Spark
 
-## 2. ติดตั้ง backend
+เปิด [Firebase Console](https://console.firebase.google.com/) → เลือกโปรเจกต์ NimbusRail ที่สร้างไว้
 
-ใช้ Node.js 22 และรันจาก root ของโครงการ:
+ถ้ายังไม่มี ให้กดสร้างโปรเจกต์ ตั้งชื่อ NimbusRail และข้าม Google Analytics/Gemini ได้ จด **Project ID** จาก ⚙️ → Project settings → General
+
+คงแผน **Spark** ไว้ ข้ามขั้นตอน Upgrade/Blaze ในคู่มือรุ่นก่อนทั้งหมด
+
+## 2. เปิด Authentication และสร้างผู้ใช้ 2 บัญชี
+
+ไปที่ **Build → Authentication → Get started → Sign-in method** แล้วเปิด **Email/Password**
+
+ที่แท็บ **Users → Add user** สร้าง:
+
+| บัญชี | ใช้ที่ไหน | ข้อมูลที่ต้องจด |
+| --- | --- | --- |
+| เจ้าของ เช่นอีเมลของคุณ | เข้าสู่ระบบในแอพ | อีเมล รหัสผ่าน และ UID |
+| บอร์ด เช่น esp32@example.com | ให้ ESP32 ส่งข้อมูลและอ่านคำสั่ง | อีเมล รหัสผ่าน และ UID |
+
+**UID สองบัญชีต้องต่างกัน** บอร์ดใช้บัญชีของตนเอง ไม่ใส่รหัสผ่านเจ้าของหรือ service account ลงใน ESP32
+จด UID จากแถวผู้ใช้ ไม่ใช่ Project ID
+
+## 3. สร้าง Realtime Database
+
+ไปที่ **Build → Realtime Database → Create database**
+
+1. เลือก **Singapore / asia-southeast1**
+2. เลือก **Start in locked mode**
+3. คัดลอก Database URL ด้านบนแท็บ Data เช่น:
+
+```text
+https://YOUR_PROJECT-default-rtdb.asia-southeast1.firebasedatabase.app
+```
+
+ใช้ **Realtime Database** สำหรับโค้ดนี้
+
+ที่แท็บ **Rules** เปิดไฟล์ [firebase/database.rules.json](../firebase/database.rules.json) แล้วคัดลอกเนื้อหาทั้งไฟล์ไปแทน rules ใน Console จากนั้นกด **Publish**
+
+กฎนี้อนุญาตให้บอร์ดเขียนข้อมูลเฉพาะของตน และให้เจ้าของส่งคำสั่งเฉพาะอุปกรณ์ของตน ไม่เปิดอ่าน/เขียนสาธารณะ
+
+หากต้องการใช้ CLI แทนการวาง Rules ใน Console รันจาก root:
 
 ```powershell
 npm --prefix firebase ci
-npm --prefix firebase/functions ci
 cd firebase
 npx firebase login
-npx firebase use --add
-npx firebase deploy --only database,functions
+npx firebase deploy --only database --project YOUR_PROJECT_ID
 ```
 
-หากเคย login และหมดอายุ ใช้ npx firebase login --reauth เลือก project ที่สร้างในขั้นตอนแรก การ deploy จะสร้างบริการจริงในบัญชีของคุณ
+คำสั่งนี้ deploy เฉพาะ Rules ใช้ Spark ได้ ถ้า login เดิมหมดอายุ ใช้ npx firebase login --reauth
 
-Functions ใช้ region asia-southeast1:
+## 4. เตรียมค่า Web API Key และ Device ID
 
-| Function | หน้าที่ |
-| --- | --- |
-| deviceSync | รับ telemetry/logs และส่งคำสั่งให้ ESP32 ด้วย device credential |
-| issueCommand | ตรวจเจ้าของและสถานะอุปกรณ์ก่อนรับคำสั่งจากแอพ |
-| detectRain | สร้าง alert เมื่อผลวัดใหม่ข้ามเกณฑ์ฝน |
-| sendRainPush | ส่ง FCM จาก alert ที่บันทึกไว้ |
+**Web API Key:** ⚙️ Project settings → General → Web API Key
 
-Database rules จำกัดข้อมูลตามเจ้าของ บัญชีแอพอ่าน secret ของบอร์ดไม่ได้และเขียนคำสั่งลง database โดยตรงไม่ได้
+หากไม่เห็น ให้เพิ่มแอพเว็บด้วยไอคอน **</>** ตั้งชื่อเช่น NimbusRail-setup แล้วดูค่า apiKey ใน firebaseConfig ที่แสดง ไม่ต้องเปิด Hosting
+API Key ตัวนี้เป็นค่า configuration สำหรับ Firebase Auth ไม่ใช่ service account private key
 
-## 3. ลงทะเบียน ESP32 ให้เจ้าของ
+**Device ID:** ดู Serial Monitor ของ ESP32 เช่น:
 
-บอร์ดที่ใช้ทดสอบก่อนหน้านี้คือ sl-4824d3 ตรวจยืนยัน ID จาก Serial Monitor ของบอร์ดที่จะใช้
+```text
+Device: sl-4824d3
+```
 
-สคริปต์ provision ต้องมีสิทธิ์ Admin ผ่าน Application Default Credentials (ADC) เช่น gcloud auth application-default login หรือใช้ไฟล์ service account ผ่าน GOOGLE_APPLICATION_CREDENTIALS โดยเก็บไฟล์ไว้นอก repository **ไม่ใส่ service account ลงแอพ/ESP32 และไม่ส่งกุญแจในแชต**
+บอร์ดที่ทดสอบก่อนหน้านี้คือ sl-4824d3 แต่ให้ใช้ค่าจากบอร์ดของคุณจริง
 
-จาก root:
+## 5. สร้างไฟล์ตั้งค่าบอร์ดด้วยตัวช่วย
+
+เปิด Terminal ใน VS Code ที่ D:\NimbusRall แล้วรัน:
 
 ```powershell
-npm --prefix firebase/functions run provision -- YOUR_PROJECT_ID https://YOUR_DATABASE_URL OWNER_UID sl-4824d3
-python scripts/configure_firebase_device.py firebase/.private/sl-4824d3.json
+python scripts/configure_firebase_device.py
 ```
 
-สคริปต์สร้าง secret แบบสุ่ม เก็บเฉพาะ hash บน server และสร้าง include/firebase_secrets.h ในเครื่อง ทั้งสองไฟล์ถูก gitignore ส่วน Wi-Fi ใช้ include/secrets.h เดิม:
-WIFI_SSID และ WIFI_PASSWORD ไม่ต้องใส่รหัส Wi-Fi ในแอพ
+กรอกตามลำดับ:
 
-การ provision ซ้ำด้วยข้อมูลเดิมสามารถทำต่อได้ หากบอร์ดถูกผูกกับบัญชีหรือ secret อื่นอยู่ สคริปต์จะปฏิเสธแทนการเขียนทับ
+1. Database URL
+2. Web API Key
+3. UID เจ้าของ
+4. UID บอร์ด
+5. อีเมลบัญชีบอร์ด
+6. รหัสผ่านบัญชีบอร์ด — ตอนพิมพ์จะไม่แสดงตัวอักษรบนจอ
+7. Device ID — กด Enter ใช้ sl-4824d3 เฉพาะถ้าตรงกับบอร์ดนี้
 
-ไฟล์ firebase_secrets.example.h เป็นตัวอย่างรูปแบบเท่านั้น การใส่ URL อย่างเดียวโดยยังไม่ provision จะเชื่อมต่อไม่ได้
+ตัวช่วยสร้าง:
 
-## 4. ทดสอบ Firebase แบบไม่มี servo ก่อน
+- include/firebase_secrets.h — สำหรับคอมไพล์บอร์ด ถูก Git ignore
+- firebase/.private/pairing-sl-4824d3.json — สำหรับผูกเจ้าของกับบอร์ด
+- firebase/.private/access-sl-4824d3.json และ owner-sl-4824d3.json — สำหรับเพิ่มในฐานข้อมูลที่มีข้อมูลเดิม
+
+หากมี firebase_secrets.h จากครั้งก่อนและต้องการแทนที่ ใช้:
+
+```powershell
+python scripts/configure_firebase_device.py --replace
+```
+
+หากต้องการกรอกไฟล์เอง ให้คัดลอก [include/firebase_secrets.example.h](../include/firebase_secrets.example.h) เป็น include/firebase_secrets.h แล้วใส่ค่าครบ 5 ตัว ส่วน Wi-Fi ยังใช้ WIFI_SSID และ WIFI_PASSWORD ใน include/secrets.h เดิม
+
+ห้ามส่งรหัสผ่านหรือไฟล์ firebase_secrets.h ลงแชตหรือ Git
+
+## 6. ผูกบัญชีเจ้าของกับบอร์ดใน Database
+
+สำหรับ **ฐานข้อมูลใหม่ที่ยังว่าง**:
+
+1. ไป Realtime Database → Data
+2. เลือก root ของฐานข้อมูล
+3. เปิดเมนู ⋮ → **Import JSON**
+4. เลือก firebase/.private/pairing-sl-4824d3.json ที่ตัวช่วยสร้าง
+5. ยืนยันการนำเข้า
+
+**Import JSON จะแทนข้อมูลในตำแหน่งที่เลือก** ถ้ามีข้อมูลเดิมอยู่ ห้าม import pairing ทั้งไฟล์ที่ root ให้เพิ่มเฉพาะสองตำแหน่งนี้แทน:
+
+| ตำแหน่งใน Data | ไฟล์นำเข้า |
+| --- | --- |
+| access/sl-4824d3 | access-sl-4824d3.json |
+| users/OWNER_UID/devices/sl-4824d3 | owner-sl-4824d3.json |
+
+เปลี่ยน OWNER_UID และ Device ID ให้ตรงข้อมูลจริง หากตำแหน่งยังไม่มี ใช้ปุ่ม + เพิ่ม child ตามลำดับได้ หรือเพิ่มค่าด้วยมือดังนี้:
+
+```json
+{
+  "access": {
+    "sl-4824d3": {
+      "ownerUid": "UID_เจ้าของ",
+      "deviceUid": "UID_บอร์ด"
+    }
+  },
+  "users": {
+    "UID_เจ้าของ": {
+      "devices": {
+        "sl-4824d3": { "name": "NimbusRail" }
+      }
+    }
+  }
+}
+```
+
+access ใช้ให้ Rules ตรวจสิทธิ์ แอพและบอร์ดไม่สามารถแก้เจ้าของเองได้ ให้ผู้ดูแลจัดการผ่าน Console
+
+## 7. อัปโหลดบอร์ดแบบไม่มี servo ก่อน
+
+ปิด Serial Monitor ที่จับพอร์ตอยู่ แล้วรันจาก root:
 
 ```powershell
 C:\.platformio\penv\Scripts\platformio.exe run -e firebase_no_servo -t upload --upload-port COM3
 C:\.platformio\penv\Scripts\platformio.exe device monitor --port COM3 --baud 115200
 ```
 
-เปลี่ยน COM3 ให้ตรงพอร์ตปัจจุบัน ปิด Serial Monitor อีกตัวก่อน upload ไม่ต้อง uploadfs ซ้ำหาก model และ LittleFS ใช้งานอยู่แล้ว เพราะ uploadfs จะทับข้อมูลเดิม
+เปลี่ยน COM3 ตามพอร์ตที่ Windows เห็น รอ Wi-Fi และเวลา NTP แล้วควรเห็น:
 
-Serial จะแสดง SSID/IP และสถานะ Firebase ดูในแอพว่าขึ้นออนไลน์และมีค่าเซ็นเซอร์จริง ถ้า HTTP 401 ให้ตรวจ device credential/ID ถ้าเริ่มซิงก์ไม่ได้ให้ตรวจ Wi-Fi, DNS/NTP, endpoint และ certificates โดยไม่ปิดการตรวจ TLS
+```text
+[FIREBASE] Spark | Device sl-4824d3 | Auth + RTDB ready
+[WIFI] Connected | SSID: ... | IP: ...
+[FIREBASE] Spark database connected
+```
 
-เฟิร์มแวร์รอเวลา NTP ก่อนเชื่อม HTTPS อ่านเซ็นเซอร์และตัดสินใจในเครื่องได้แม้ cloud หลุด เครือข่าย HTTPS ทำงานใน task แยกจาก motorTick
+ตรวจใน Firebase Data ว่ามี devices/sl-4824d3/telemetry และ logs บอร์ดส่งข้อมูลราวทุก 10 วินาทีหลังคำขอก่อนหน้าจบ และทยอยส่ง logs สูงสุด 4 รายการต่อรอบ
 
-ใน firebase_no_servo ปุ่ม servo จะถูกปิด แต่ปุ่มวัดค่าตอนนี้ยังใช้ได้
+ไม่ต้อง uploadfs ซ้ำหาก LittleFS และโมเดลใช้งานอยู่ เพราะ uploadfs จะเขียนทับ filesystem เดิม
 
-เมื่อพร้อมทดสอบ servo จริง ใช้ environment firebase_servo ต่อ servo ตาม config ของโครงการและใช้แหล่งจ่ายที่รองรับกับกราวด์ร่วม จากนั้นเลือก Manual → เก็บผ้าก่อนเพื่อเริ่มตำแหน่ง → ตากผ้า
+ใน firebase_no_servo แอพสั่งวัดค่าได้ แต่ปุ่ม servo ถูกปิด เมื่อพร้อมทดสอบ servo จริงจึงเลือก firebase_servo และเริ่ม Manual → เก็บผ้าก่อน → ตากผ้า ตามการเริ่มตำแหน่งของเฟิร์มแวร์เดิม
 
-สถานะ EXTENDED/RETRACTED อ้างอิงมุม servo ที่สั่งจาก firmware เดิม ไม่มี feedback ยืนยันตำแหน่งจริง Manual จะหมดเวลาตามค่า manual_timeout_s เดิมของบอร์ดแล้วกลับ Auto
+สถานะราวคำนวณจากมุม servo ที่สั่ง ไม่มีเซ็นเซอร์ยืนยันตำแหน่งจริง และคำสั่งผ่านเครือข่ายมีความหน่วง
 
-## 5. ตั้งค่าแอพ Android/iOS
+## 8. ตั้งค่าแอพ Android/iOS
 
-ติดตั้ง Flutter SDK และ Android Studio/Android SDK สำหรับ Android ส่วน iOS ต้องใช้ macOS + Xcode และตั้ง Signing Team
+ติดตั้ง Android SDK/Android Studio สำหรับ Android ส่วน iOS ใช้ macOS + Xcode พร้อม Signing Team
+
+แอพ Android ใช้ application ID: com.nimbusrall.smartline_app
+แอพ iOS ใช้ bundle ID: com.nimbusrall.smartlineApp
 
 จากโฟลเดอร์ mobile:
 
@@ -94,72 +194,56 @@ flutter pub get
 flutter run
 ```
 
-บนเครื่องนี้ Flutter อยู่ที่ D:\NimbusRall\.tools\flutter\bin เพิ่ม path นี้ใน PATH หรือใช้ path เต็ม CLI FlutterFire อยู่ใน pub-cache/bin ของผู้ใช้
+Flutter บนเครื่องนี้อยู่ที่ D:\NimbusRall\.tools\flutter\bin เพิ่ม path นี้ใน PATH ก่อนใช้คำสั่ง flutter/dart หรือใช้ path เต็ม
 
-App identifiers ที่ scaffold ไว้:
+ตรวจให้มี native configuration:
 
-- Android: com.nimbusrall.smartline_app
-- iOS: com.nimbusrall.smartlineApp
+- Android: mobile/android/app/google-services.json และ Google Services Gradle plugin ที่ FlutterFire CLI ตั้งให้
+- iOS: mobile/ios/Runner/GoogleService-Info.plist อยู่ใน Runner target
 
-FlutterFire CLI ต้องเพิ่ม native configuration และ Google Services Gradle plugin ให้ Android ตรวจว่ามี mobile/android/app/google-services.json และ mobile/ios/Runner/GoogleService-Info.plist แอพเรียก Firebase.initializeApp() ด้วยค่า native ของแต่ละแพลตฟอร์ม จึงไม่ต้องแก้ main.dart เพื่อใส่ API key
+แอพใช้ Firebase.initializeApp() จากค่า native จึงไม่ต้องใส่ API key ใน main.dart ส่วน Push บน iOS native ต้องตั้ง APNs เพิ่มตาม [คู่มือ Push](PUSH_NOTIFICATIONS.md)
 
-บน iOS ตรวจว่า GoogleService-Info.plist อยู่ใน Runner target และ Signing & Capabilities มี Push Notifications กับ Background Modes → Remote notifications มี entitlement template ให้แล้ว ต้องใช้ provisioning profile ของบัญชี Apple ของคุณ
+เข้าสู่แอพด้วย **บัญชีเจ้าของ** บอร์ดที่ผูก UID นี้จะปรากฏ ถ้าไม่ปรากฏ ให้ตรวจ users/OWNER_UID/devices และ UID ของผู้ใช้ที่ล็อกอินอยู่
 
-เปิดแอพ เข้าสู่ระบบด้วยผู้ใช้จากขั้นตอน 1 บอร์ดที่ provision ให้ UID นี้จะปรากฏอัตโนมัติ หากยังไม่มีบอร์ด แอพแสดง UID ให้คัดลอก
+ตัวอย่างที่ http://127.0.0.1:8085 ยังเป็นโหมดจำลองสำหรับลองหน้าจอ ไม่ได้เชื่อม Firebase project ของคุณ
 
-สร้างไฟล์ติดตั้งเมื่อ native SDK พร้อม:
+## 9. พฤติกรรมคำสั่งและแจ้งเตือน
 
-```powershell
-flutter build apk --release
-```
+- เจ้าของเขียน control ผ่าน SDK; Rules ตรวจเจ้าของ อุปกรณ์ออนไลน์ภายใน 30 วินาที คำสั่งที่อนุญาต และสถานะเปิด servo
+- คำสั่งปกติมีอายุประมาณ 25 วินาที Rules จำกัดไม่เกิน 30 วินาที บอร์ดไม่ทำคำสั่งหมดอายุและจำ ID ก่อนทำงาน เพื่อไม่ทำซ้ำหลัง reboot
+- มีคำสั่งค้างได้ครั้งเดียว STOP สามารถแทนคำสั่งเดิมได้ เฟิร์มแวร์เขียนผลตอบรับไว้ที่ acks/COMMAND_ID
+- accepted คือรับคำสั่งแล้ว ให้ดูสถานะราวประกอบ ไม่ใช่การยืนยันตำแหน่งทางกายภาพ
+- บอร์ดสร้าง alerts จากผลใน logs เมื่อค่าฝนข้ามเกณฑ์ปัจจุบัน ใช้ ID ตาม seq เพื่อให้การส่งซ้ำไม่เพิ่มรายการซ้ำ
+- เมื่อเน็ตกลับมา logs/alerts ย้อนหลังจะซิงก์ตามข้อมูลที่ยังอยู่ในบอร์ด แอพไม่แจ้งเตือนซ้ำจากประวัติครั้งแรก และไม่แสดงข้อความเตือนจากเหตุการณ์เก่ากว่า 5 นาที
+- รับ OS Push เมื่อปิดแท็บ/อยู่เบื้องหลังได้หลังตั้งค่า FCM และเปิดตัวส่งตาม [คู่มือ Push](PUSH_NOTIFICATIONS.md) ยังคง Spark ได้
+- LittleFS เก็บสูงสุด 4,608 รายการตามค่าเดิม Cloud logs ไม่มีการลบอัตโนมัติ ให้ตรวจโควตา Spark ใน Console
+- MQTT เดิมยังอยู่ใน environment อื่น ส่วน firebase_no_servo / firebase_servo ใช้ Spark แล้ว
 
-APK อยู่ใน mobile/build/app/outputs/flutter-apk/app-release.apk ค่า signing ปัจจุบันเป็น debug key ของ scaffold เหมาะสำหรับทดสอบในเครื่อง ต้องตั้ง release signing ก่อนส่ง Play Store
+## แก้ปัญหาเบื้องต้น
 
-บน macOS ใช้ flutter build ipa แล้วจัดการ signing/distribution ผ่าน Xcode/App Store Connect
+| อาการ | ตรวจอะไร |
+| --- | --- |
+| Auth failed HTTP 400 | เปิด Email/Password แล้วหรือยัง; อีเมล รหัสผ่าน และ Web API Key ของบอร์ดถูกต้องหรือไม่ |
+| Auth response or device UID mismatch | FIREBASE_DEVICE_UID ต้องตรงกับบัญชีที่ใช้ล็อกอินบอร์ด |
+| Sync failed HTTP 401 | ตรวจ Rules, access/DEVICE_ID, deviceUid และ Database URL |
+| ยังไม่มีอุปกรณ์ในแอพ | ตรวจ users/OWNER_UID/devices และล็อกอินบัญชีเจ้าของ |
+| ปุ่ม servo กดไม่ได้ | firebase_no_servo ปิด servo หรือสถานะบอร์ดเก่ากว่า 30 วินาที |
+| มีบันทึกแต่ไม่เด้งเตือน | ประวัติครั้งแรก/ข้อมูลเก่าไม่แจ้งซ้ำ; หากใช้ Push ตรวจตัวส่งและสิทธิ์ตามคู่มือ Push |
+| แอพเปิดหน้าแนะนำแทนล็อกอิน | native Firebase configuration ยังไม่ครบ |
 
-## 6. แจ้งเตือนฝน
-
-กดกระดิ่งในแอพเพื่อขอสิทธิ์แจ้งเตือนและลงทะเบียน FCM token Android 13+ ต้องอนุญาต notification บน iOS ต้องอัปโหลด APNs authentication key ไปยัง Firebase Console → Project Settings → Cloud Messaging ก่อน
-
-- เปิดแอพอยู่: แสดงข้อความแจ้งเตือนในแอพ
-- แอพอยู่ background: FCM notification แสดงผ่านระบบมือถือเมื่อสิทธิ์และ APNs/FCM พร้อม
-- แตะ notification: เปิดหน้าแจ้งเตือนของอุปกรณ์
-- ระบบบันทึกประวัติ alert ไว้แม้มือถือไม่ได้ออนไลน์
-
-การแจ้งเตือนเกิดเมื่อ sample ใหม่ข้าม retract_threshold ไม่ส่งทุก heartbeat ไม่แจ้งจากข้อมูลเซ็นเซอร์ผิดพลาดหรือ sample เก่ากว่า 5 นาที ถ้าบอร์ดออนไลน์ครั้งแรกแล้วค่าฝนสูงจะสร้าง alert ด้วย ID ตาม seq ผล high ต่อเนื่องไม่สร้างรายการซ้ำ จนค่าลงต่ำแล้วขึ้นใหม่
-
-FCM อาจส่งซ้ำเมื่อบริการ retry และการส่งถึงมือถือขึ้นกับเครือข่าย/ระบบปฏิบัติการ ไม่มีการรับประกันเวลาแน่นอน รายการ alert ใน database ใช้ ID คงที่ต่อ sample
-
-รองรับการส่งไปยัง 10 token ที่ลงทะเบียนล่าสุดต่อบัญชี การออกจากระบบจะถอน token ของโทรศัพท์นี้ก่อน sign-out
-
-## 7. คำสั่งและบันทึก
-
-คำสั่ง MEASURE, EXTEND, RETRACT, STOP, MODE AUTO และ MODE MANUAL เท่านั้นที่อนุญาตจากแอพ
-
-คำสั่งหมดอายุภายใน 30 วินาที บัญชีอื่นหรืออุปกรณ์ที่ไม่ได้ซิงก์เกิน 30 วินาทีจะสั่งไม่ได้ ESP32 จำ command ID ก่อนทำงานเพื่อป้องกันการสั่งซ้ำหลัง reboot ถ้าบอร์ดดับระหว่างดำเนินคำสั่งและไม่ทราบผล จะปฏิเสธการเล่นซ้ำ ให้ตรวจสถานะแล้วสั่งใหม่
-
-accepted หมายถึงเฟิร์มแวร์รับคำสั่งแล้ว ไม่ใช่เคลื่อนที่เสร็จ แอพแสดงสถานะราวแยกต่างหาก STOP ผ่าน cloud มีความหน่วงจาก polling/เครือข่าย จึงไม่ใช่ปุ่มหยุดฉุกเฉินทางไฟฟ้า
-
-LittleFS เก็บบันทึกตามขนาดเดิม 4,608 รายการ ซิงก์สูงสุด 4 รายการต่อรอบ เมื่อเน็ตกลับมาจะไล่ส่งย้อนหลัง หาก offline จนเกินความจุ ข้อมูลเก่าสุดจะถูกแทนที่ตามการทำงานเดิม Cloud logs เก็บต่อเนื่อง ยังไม่มีนโยบายลบอัตโนมัติ ควรกำหนดอายุข้อมูลก่อนใช้งานระยะยาว
-
-READLOG ผ่าน Firebase ไม่ใช้ CSV; แอพอ่าน logs ใน database โดยตรง คำสั่ง DELLOG ทาง Serial ยังจัดการเฉพาะไฟล์ในบอร์ด ไม่ลบประวัติ cloud
-
-## 8. ทดสอบในเครื่อง
+## ทดสอบโค้ดในเครื่อง
 
 ```powershell
-npm --prefix firebase/functions test
-npm --prefix firebase run test:rules
-npm --prefix firebase run test:integration
+npm --prefix firebase ci
+npm --prefix firebase test
+python -m unittest discover -s tests -p test_spark_setup.py
 cd mobile
 flutter analyze
 flutter test
 ```
 
-Emulator tests ใช้ project จำลอง demo-smartline และต้องมี Java 21 ไม่ deploy หรือสั่งบอร์ดจริง
+ชุดทดสอบใช้ Auth + Database Emulator, project จำลอง demo-smartline และ Java 21 ไม่ต้องเปิด billing
 
-เอกสารอ้างอิง:
-- [ตั้งค่า Firebase กับ Flutter](https://firebase.google.com/docs/flutter/setup)
-- [Flutter FCM และการตั้งค่า APNs](https://firebase.google.com/docs/cloud-messaging/flutter/get-started)
-- [รับข้อความขณะเปิดแอพและ background](https://firebase.google.com/docs/cloud-messaging/flutter/receive-messages)
-- [Realtime Database security rules](https://firebase.google.com/docs/database/security)
-- [HTTP Functions](https://firebase.google.com/docs/functions/http-events)
+โค้ด firebase/functions/ เป็นรุ่น Blaze เก่าที่เก็บไว้อ้างอิง ไม่ได้อยู่ใน firebase.json และแอพ/บอร์ดรุ่นปัจจุบันไม่เรียกใช้งาน
+
+อ้างอิง: [Firebase Pricing](https://firebase.google.com/pricing), [Auth REST](https://firebase.google.com/docs/reference/rest/auth), [Database REST authentication](https://firebase.google.com/docs/database/rest/auth), [ตั้งค่า Flutter](https://firebase.google.com/docs/flutter/setup)

@@ -1,4 +1,5 @@
 <!doctype html>
+<!-- ภาพรวม: หน้าเว็บ MQTT รุ่นเดิมสำหรับดูข้อมูล/สั่งราว; แอพ Firebase อยู่ใน mobile/ -->
 <html lang="th"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <title>Smart Clothesline · ศรีราชา</title>
 <style>
@@ -34,6 +35,7 @@ function putRecord(row){if(!Number.isSafeInteger(row.seq)||row.seq<1)return;cons
 function parseRow(line){const parts=line.replace(/\r$/,'').split(',');if(parts.length!==fields.length)throw Error('CSV จำนวนคอลัมน์ไม่ถูกต้อง');const r={};fields.forEach((k,i)=>r[k]=k==='line'?parts[i]:parts[i]===''?null:Number(parts[i]));if(!Number.isSafeInteger(r.seq)||r.seq<1||fields.some(k=>k!=='line'&&r[k]!==null&&!Number.isFinite(r[k])))throw Error('CSV ไม่ถูกต้อง');return r;}
 function csvRows(){return [...records.values()].sort((a,b)=>a.seq-b.seq);}
 function crc32(text){let crc=0xffffffff;for(const b of new TextEncoder().encode(text)){crc^=b;for(let k=0;k<8;k++)crc=(crc>>>1)^((crc&1)?0xedb88320:0);}return ((crc^0xffffffff)>>>0).toString(16).padStart(8,'0').toUpperCase();}
+// ประกอบ log ที่ส่งเป็นช่วง และตรวจจำนวนแถว/CRC ก่อนนำเข้า
 function logMessage(text){
  if(!transfer)return;
  if(text.startsWith('#BEGIN ')){if(transfer.started)return;transfer.started=true;transfer.expected=Number(/rows=(\d+)/.exec(text)?.[1]||0);return;}
@@ -41,6 +43,7 @@ function logMessage(text){
  if(text.startsWith('#END ')){const m=/^#END rows=(\d+) crc32=([A-Fa-f0-9]{8})$/.exec(text);if(!m)throw Error('END ไม่ถูกต้อง');let body='';for(let i=0;i<transfer.chunks.size;i++){if(!transfer.chunks.has(i))throw Error('chunk ขาดหาย');body+=transfer.chunks.get(i);}if(crc32(body)!==m[2].toUpperCase())throw Error('CRC32 ไม่ตรง กรุณาอ่านใหม่');const lines=body.trimEnd().split('\n');if(lines.shift()!==fields.join(','))throw Error('CSV header ไม่ตรง');const rows=lines.filter(Boolean).map(parseRow);if(rows.length!==Number(m[1]))throw Error('จำนวนแถวไม่ตรง');rows.forEach(putRecord);transfer=null;$('progress').value=1;$('logInfo').textContent='CRC32 ผ่าน · รับครบ '+rows.length+' แถว';renderRows();draw();}
 }
 function modelValidate(model,text){if(new TextEncoder().encode(text).length>4096||typeof model.version!=='string'||!model.version.length||model.version.length>48||JSON.stringify(model.features)!==JSON.stringify(featureNames)||model.uses_rain_now!==false||!Number.isFinite(model.intercept)||!(model.horizon_h>0)||!(model.rain_mm>0)||!Number.isFinite(model.threshold_suggest)||model.threshold_suggest<0||model.threshold_suggest>1)throw Error('schema โมเดลไม่ตรง');for(const k of ['mean','scale','coef'])if(!Array.isArray(model[k])||model[k].length!==featureNames.length||model[k].some(v=>!Number.isFinite(v)||Math.abs(v)>=1e9||(k==='scale'&&v<=0)))throw Error('ค่า '+k+' ไม่ถูกต้อง');}
+// แยกข้อความตาม topic เพื่ออัปเดตสถานะ ค่าตั้ง ผลคำสั่ง หรือ log
 function receive(suffix,text){try{if(text.length>20000)throw Error('message ใหญ่เกิน');if(suffix==='availability'){online=text==='online';render();}
  else if(suffix==='status'){const s=JSON.parse(text);if(!s||typeof s!=='object'||!['EXTENDED','RETRACTED','MOVING_OUT','MOVING_IN','UNKNOWN','FAULT_TIMEOUT'].includes(s.line))throw Error('status ไม่ถูกต้อง');latest=s;statusAt=Date.now();render();}
  else if(suffix==='config'){const s=JSON.parse(text);for(const k of Object.keys(defaults))if(Number.isFinite(s[k]))config[k]=s[k];showConfig();}
@@ -77,6 +80,7 @@ function demoCommand(cmd,suffix){let ok=true,msg='ok (DEMO)';const a=cmd.split('
  else if(cmd==='DELLOG'){demoBoard.clear();latest.logCount=0;msg='ลบ log บนบอร์ดจำลองแล้ว; ข้อมูลที่ดาวน์โหลดในเบราว์เซอร์ยังคงอยู่';}
  else if(a[0]==='LABEL'){const r=demoBoard.get(Number(a[1]));if(r){r.rain_label=Number(a[2]);putRecord(r);renderRows();}else ok=false;}
  receive('ack',JSON.stringify({cmd:suffix==='model/set'?'MODEL':cmd,ok,msg}));demoStatus();}
+// จำลองบอร์ดในหน้าเว็บ ไม่ส่งคำสั่งไปอุปกรณ์จริง
 async function demo(){cleanup();isDemo=online=broker=true;phase='ready';base='demo/sl-demo';config={...defaults};latest={line:'RETRACTED',mode:'AUTO',model:'demo-rules',fallback:true,rssi:-42,uptime:0,fault:null};showConfig();await loadRecords();demoBoard=new Map([...records].map(([k,v])=>[k,{...v}]));demoSeq=Math.max(0,...records.keys());demoNext=Date.now()+config.interval_s*1000;if(!records.size){for(let i=0;i<96;i++)demoMeasure(Math.floor(Date.now()/1000)-(95-i)*1800);}latest.line='RETRACTED';demoAngle=15;demoDry=0;demoStatus();notice('โหมดจำลอง · ไม่มีคำสั่งส่งไปอุปกรณ์จริง · กดวัดทันทีเพื่อเปลี่ยนสภาพอากาศ');demoTick();}
 for(const k of Object.keys(defaults)){const l=document.createElement('label');l.textContent=labels[k];const i=document.createElement('input');i.type='number';i.step='any';i.id='cfg-'+k;l.append(i);$('settings').append(l);}showConfig();
 for(const [key,name,color]of chartSeries){const l=document.createElement('label');const i=document.createElement('input');i.type='checkbox';i.id='plot-'+key;i.checked=['temp_c','p_rain'].includes(key);i.onchange=draw;l.append(i,document.createTextNode(name));l.style.color=color;$('series').append(l);}

@@ -1,11 +1,4 @@
 {
-  "functions": [
-    {
-      "source": "functions",
-      "codebase": "smartline",
-      "runtime": "nodejs22"
-    }
-  ],
   "database": {
     "rules": "database.rules.json"
   },
@@ -16,12 +9,43 @@
     "database": {
       "port": 9000
     },
-    "functions": {
-      "port": 5001
-    },
     "ui": {
       "enabled": true,
       "port": 4000
     }
+  },
+  "hosting": {
+    "public": "../mobile/build/web",
+    "ignore": [
+      "firebase.json",
+      "**/.*",
+      "**/node_modules/**"
+    ],
+    "rewrites": [
+      {
+        "source": "**",
+        "destination": "/index.html"
+      }
+    ],
+    "headers": [
+      {
+        "source": "/firebase-messaging-sw.js",
+        "headers": [
+          {
+            "key": "Cache-Control",
+            "value": "no-cache"
+          }
+        ]
+      },
+      {
+        "source": "/firebase-push-config.js",
+        "headers": [
+          {
+            "key": "Cache-Control",
+            "value": "no-cache"
+          }
+        ]
+      }
+    ]
   }
 }

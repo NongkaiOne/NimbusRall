@@ -1,3 +1,4 @@
+// ภาพรวม: ทดสอบหน้าจอ/คำสั่งจำลอง รวมการปิดปุ่มเมื่อบอร์ดออฟไลน์หรือไม่เปิด servo
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:smartline_app/main.dart';

@@ -1,3 +1,4 @@
+// ภาพรวม: จำลอง API/ตัวแปร Arduino สำหรับทดสอบบนคอม ไม่ใช่ header ที่ใช้แฟลช ESP32
 #pragma once
 #include <cstdint>
 #include <string>

@@ -1,3 +1,4 @@
+// ภาพรวม: ทดสอบสถานะและ timeout ของ servo บนคอมด้วยสภาพแวดล้อมจำลอง
 #include "app.h"
 #include <cassert>
 #include <cstdio>

@@ -1,3 +1,4 @@
+# ภาพรวม: ทดสอบระบบ MQTT กับ broker ตามค่าที่กำหนด สำหรับเส้นทาง MQTT
 """Local TLS + authenticated MQTT integration using a disposable Python broker.
 Does not replace physical ESP32 testing or validate the Mosquitto Docker image.
 """

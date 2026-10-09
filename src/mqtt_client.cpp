@@ -1,3 +1,4 @@
+// ภาพรวม: เครือข่าย MQTT สำหรับ environment ที่ไม่ได้เปิด SMARTLINE_FIREBASE เป็นทางเลือกแยกจาก Firebase
 #ifndef SMARTLINE_FIREBASE
 #include "app.h"
 #include <WiFi.h>
@@ -21,6 +22,7 @@ static uint32_t wifiAt=0,mqttAt=0,wifiBackoff=30000,mqttBackoff=2000;
 static uint32_t pubSeq=0,pendingSeq=0,backlogAt=0,pendingAt=0;static int pendingId=0;
 static bool stream=false;static uint32_t streamSeq=0,streamEnd=0,streamRows=0,streamCrc=0xffffffff,chunk=0;
 static int streamPending=0,streamStage=0;static String streamPayload;static uint32_t streamAt=0;
+// รับ event จาก MQTT เข้าคิว ให้ loop หลักเป็นผู้ทำคำสั่งจริง
 static void eventHandler(void*,esp_event_base_t,int32_t eventId,void* data){
   auto e=(esp_mqtt_event_handle_t)data;
   if(eventId==MQTT_EVENT_CONNECTED){online=true;announce=true;return;}
@@ -38,6 +40,7 @@ int publish(const char* suffix,const String& body,int qos,bool retain){
   if(!online||!client)return -1;
   return esp_mqtt_client_enqueue(client,(baseTopic+"/"+suffix).c_str(),body.c_str(),body.length(),qos,retain,true);
 }
+// กำหนด deviceId/topic ตั้ง Wi-Fi และ NTP แล้วรอเริ่ม MQTT เมื่อพร้อม
 void networkBegin(){
   uint64_t mac=ESP.getEfuseMac();char id[16];snprintf(id,sizeof(id),"sl-%06lx",(unsigned long)((mac>>24)&0xffffff));deviceId=id;baseTopic=String(TOPIC_PREFIX)+"/"+deviceId;
   events=xQueueCreate(8,sizeof(Event));
@@ -66,6 +69,7 @@ void networkBegin(){
 void readlogStart(uint32_t since){stream=true;streamSeq=max(logOldest(),since+1);streamEnd=seqHigh;streamRows=0;chunk=0;streamCrc=0xffffffff;streamStage=0;streamPending=0;
   streamPayload="#BEGIN rows="+String(logCount())+" since="+String(since);streamAt=millis();}
 bool readlogBusy(){return stream;}void readlogCancel(){stream=false;streamPending=0;streamPayload="";}
+// ส่ง READLOG เป็น BEGIN/CHUNK/END พร้อม CRC32 และรอยืนยันแต่ละช่วง
 static void streamTick(){
   if(!stream||!online)return;
   if(millis()-streamAt>120000){readlogCancel();ack("READLOG",false,"transfer timeout; retry");return;}
@@ -81,6 +85,7 @@ static void streamTick(){
   }
   int id=publish("log/file",streamPayload);if(id>0)streamPending=id;
 }
+// จัดการ reconnect คำสั่ง โมเดลใหม่ และ log ที่ยังไม่ยืนยันจาก broker
 void networkTick(){
   uint32_t now=millis();
   bool wifiConnected=WiFi.status()==WL_CONNECTED;

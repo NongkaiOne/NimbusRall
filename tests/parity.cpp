@@ -1,3 +1,4 @@
+// ภาพรวม: คำนวณ feature/ผลโมเดล C++ เพื่อเทียบกับ Python ในชุดทดสอบ
 #include <iostream>
 #include <iomanip>
 #include "features.h"

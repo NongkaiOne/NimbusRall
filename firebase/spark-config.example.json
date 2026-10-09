@@ -1,0 +1,9 @@
+{
+  "databaseURL": "https://YOUR_PROJECT-default-rtdb.asia-southeast1.firebasedatabase.app",
+  "apiKey": "YOUR_WEB_API_KEY",
+  "ownerUid": "OWNER_AUTH_UID",
+  "deviceUid": "DEVICE_AUTH_UID",
+  "deviceId": "sl-4824d3",
+  "deviceEmail": "esp32@example.com",
+  "devicePassword": "DEVICE_AUTH_PASSWORD"
+}

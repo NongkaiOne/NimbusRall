@@ -31,3 +31,5 @@ include/firebase_secrets.h
 mobile/android/app/google-services.json
 mobile/ios/Runner/GoogleService-Info.plist
 mobile/lib/firebase_options.dart
+
+mobile/web/firebase-push-config.js

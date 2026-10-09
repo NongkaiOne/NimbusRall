@@ -1,4 +1,6 @@
+// ภาพรวม: ขยับ servo ทีละองศาด้วย PWM และตรวจ timeout; รุ่น SMARTLINE_NO_SERVO ไม่ส่ง PWM
 #include "app.h"
+// โหมดไม่มี servo: ฟังก์ชันยังเรียกได้แต่ไม่เริ่มหรือส่ง PWM
 #ifdef SMARTLINE_NO_SERVO
 void motorBegin(){lineState=UNKNOWN;}
 bool motorMove(bool){return false;}
@@ -8,6 +10,7 @@ bool motorTick(){return false;}
 static int angle=90,target=90;static uint32_t startAt=0,stepAt=0;static bool attached=false;
 void motorBegin(){ledcSetup(7,50,16);lineState=UNKNOWN;}
 static void output(){if(!attached){ledcAttachPin(SERVO_PIN,7);attached=true;}ledcWrite(7,uint32_t((500+angle*2000.f/180)*65535/20000));}
+// out=true คือกาง; หากยัง UNKNOWN ต้องสั่งเก็บก่อนเพื่อเริ่มสถานะของโปรแกรม
 bool motorMove(bool out){
   if(out&&lineState==UNKNOWN)return false;
   if((out&&lineState==EXTENDED)||(!out&&lineState==RETRACTED))return true;
@@ -15,8 +18,10 @@ bool motorMove(bool out){
   target=out?SERVO_EXTEND_DEG:SERVO_RETRACT_DEG;startAt=millis();stepAt=startAt+300;
   lineState=out?MOVING_OUT:MOVING_IN;fault="";return true;
 }
+// ถอด PWM และเปลี่ยนเป็น UNKNOWN เพราะไม่มีข้อมูลยืนยันตำแหน่งจริง
 void motorStop(){if(attached){ledcDetachPin(SERVO_PIN);attached=false;}lineState=UNKNOWN;}
 bool motorTick(){
+  // ขยับทีละองศาตามเวลา และหยุดพร้อม fault หากใช้เวลานานเกินค่าตั้ง
   if(lineState!=MOVING_OUT&&lineState!=MOVING_IN)return false;
   if(millis()-startAt>=uint32_t(settings.motor_timeout_s*1000)){motorStop();lineState=FAULT_TIMEOUT;fault="servo_timeout";return true;}
   if(!due(millis(),stepAt))return false;stepAt=millis()+SERVO_STEP_MS;

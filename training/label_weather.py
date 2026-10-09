@@ -1,3 +1,4 @@
+# ภาพรวม: เติมป้ายฝนที่ขาดจาก Open-Meteo เป็นค่าประมาณ โดยรักษาป้ายของมนุษย์/เซ็นเซอร์ไว้ก่อน
 """Fill missing current-rain proxy labels, preserving all human labels. No future features."""
 import argparse,json,os,urllib.parse,urllib.request
 from datetime import datetime,timezone,timedelta

@@ -1,3 +1,4 @@
+// ภาพรวม: ทดสอบ ESP32 + Wi-Fi อย่างเดียว เพื่อแยกตรวจการเชื่อมต่อและการรีเซ็ต ไม่เริ่มเซ็นเซอร์หรือ servo
 #ifdef WIFI_STANDALONE_TEST
 #include <Arduino.h>
 #include <WiFi.h>
@@ -13,12 +14,14 @@ static constexpr unsigned long CONNECT_TIMEOUT_MS = 30000;
 static unsigned long lastReport = 0;
 static bool radioReady = false;
 
+// แสดง SSID, IP, RSSI และเวลาตั้งแต่บูต
 static void reportWiFi() {
   Serial.printf("[Wi-Fi] Connected | SSID %s | IP %s | RSSI %d dBm | uptime %lu ms\n",
                 WiFi.SSID().c_str(), WiFi.localIP().toString().c_str(),
                 WiFi.RSSI(), millis());
 }
 
+// สแกน Wi-Fi พร้อมช่องสัญญาณ แล้วคืนหน่วยความจำผลสแกน
 static void scanNetworks() {
   Serial.println("\n--- Wi-Fi scan ---");
   int count = WiFi.scanNetworks();
@@ -33,6 +36,7 @@ static void scanNetworks() {
   WiFi.scanDelete();
 }
 
+// เชื่อมด้วย secrets.h รอได้สูงสุด 30 วินาทีแล้วรายงานผล
 static void connectWiFi() {
   Serial.printf("\n[Wi-Fi] Connecting to: %s | IP pending ", WIFI_SSID);
   WiFi.begin(WIFI_SSID, WIFI_PASSWORD);
@@ -46,12 +50,14 @@ static void connectWiFi() {
   else Serial.printf("[Wi-Fi] Connection failed | status %d | IP unavailable\n", int(WiFi.status()));
 }
 
+// พิมพ์รหัสสาเหตุเมื่อหลุดจาก Wi-Fi เพื่อช่วยตรวจปัญหา
 static void onWiFiEvent(WiFiEvent_t event, WiFiEventInfo_t info) {
   if (event == ARDUINO_EVENT_WIFI_STA_DISCONNECTED) {
     Serial.printf("[Wi-Fi] Disconnected | reason %d\n", info.wifi_sta_disconnected.reason);
   }
 }
 
+// เตรียม Serial และอุปกรณ์เฉพาะชุดทดสอบนี้ ทำครั้งเดียวหลังบูต
 void setup() {
   Serial.begin(115200);
   delay(2000);
@@ -82,6 +88,7 @@ void setup() {
   lastReport = millis();
 }
 
+// ทำงานทดสอบซ้ำและพิมพ์ผลใน Serial Monitor เพื่อดูค่าจริง/อาการผิดปกติ
 void loop() {
   if (radioReady && millis() - lastReport >= REPORT_INTERVAL_MS) {
     if (WiFi.status() == WL_CONNECTED) reportWiFi();

@@ -1,3 +1,4 @@
+// ภาพรวม: ทดสอบ JavaScript ของหน้าเว็บ MQTT ด้วย DOM จำลอง ไม่สั่งอุปกรณ์จริง
 // Unit tests execute the actual inline dashboard JS, without browser automation.
 const fs=require('node:fs'),vm=require('node:vm'),assert=require('node:assert/strict');
 const html=fs.readFileSync('web/index.html','utf8'),elements=new Map(),timeouts=new Map();let tid=0;

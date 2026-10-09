@@ -1,3 +1,4 @@
+# ภาพรวม: เก็บ log ฝั่งคอมจาก MQTT ใช้ SQLite เป็นข้อมูลหลักและส่งออก CSV สำหรับดู/ฝึกโมเดล
 """Durable MQTT ingestion. SQLite is authoritative; CSV is an atomic snapshot."""
 import csv,io,json,logging,os,sqlite3,threading,time
 from pathlib import Path
@@ -6,6 +7,7 @@ import paho.mqtt.client as mqtt
 
 FIELDS='seq epoch temp_c hum_pct press_hpa lux p_rain line action flags rain_label rain_now uptime_s'.split()
 
+# ตรวจจำนวนคอลัมน์ เลขลำดับ และค่าตัวเลขของ CSV ก่อนบันทึก
 def parse_record(payload):
     values=next(csv.reader(io.StringIO(payload.strip())))
     if len(values)!=len(FIELDS): raise ValueError('Invalid CSV column count')
@@ -19,6 +21,7 @@ def parse_record(payload):
             if not math.isfinite(r[k]):raise ValueError('Non-finite sensor value')
     return r
 
+# จัดเก็บด้วยคู่ device/seq เพื่อรับข้อมูลซ้ำได้โดยไม่เพิ่มแถวซ้ำ
 class Store:
     def __init__(self,directory):
         self.directory=Path(directory);self.directory.mkdir(parents=True,exist_ok=True)
@@ -27,6 +30,7 @@ class Store:
         self.db.execute('PRAGMA journal_mode=WAL');self.db.execute('PRAGMA synchronous=FULL')
         self.db.execute('CREATE TABLE IF NOT EXISTS records(device TEXT, seq INTEGER, body TEXT, PRIMARY KEY(device,seq))')
         self.db.execute('CREATE TABLE IF NOT EXISTS status(device TEXT PRIMARY KEY, body TEXT, received INTEGER)');self.db.commit()
+    # อัปเดต log โดยไม่ให้ข้อมูลซ้ำที่ไม่มี label ลบป้ายฝนที่มนุษย์ระบุ
     def record(self,device,payload):
         r=parse_record(payload)
         with self.lock,self.db:
@@ -42,6 +46,7 @@ class Store:
     def status(self,device,payload):
         json.loads(payload)
         with self.lock,self.db:self.db.execute('INSERT OR REPLACE INTO status VALUES(?,?,?)',(device,payload,int(time.time())))
+    # เขียน snapshot CSV ลงไฟล์ชั่วคราวก่อนสลับไฟล์เมื่อเขียนครบ
     def export(self):
         with self.lock:
             if not self.dirty:return
@@ -63,6 +68,7 @@ def main():
     def on_connect(c,u,flags,reason,properties):
         if reason.is_failure:logging.error('Connection refused: %s',reason);return
         c.subscribe([(prefix+'/+/log/record',1),(prefix+'/+/status',1)])
+    # ACK หลังบันทึกสำเร็จ หากฐานข้อมูลเขียนล้มเหลวไม่ตอบรับเพื่อให้ส่งใหม่ได้
     def on_message(c,u,msg):
         try:
             parts=msg.topic[len(prefix)+1:].split('/');device=parts[0];payload=msg.payload.decode('utf-8')

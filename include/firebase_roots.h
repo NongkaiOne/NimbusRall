@@ -1,3 +1,4 @@
+// ภาพรวม: ใบรับรองรากสาธารณะสำหรับตรวจ HTTPS ของ Google/Firebase ไม่ใช่กุญแจส่วนตัว
 #pragma once
 // Public trust anchors from https://pki.goog/repository/ (GTS Root R1 and R4).
 static const char FIREBASE_TRUST_ROOTS[] = R"PEM(

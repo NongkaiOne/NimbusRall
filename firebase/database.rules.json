@@ -4,17 +4,204 @@
     ".write": false,
     "devices": {
       "$id": {
-        ".read": "auth != null && root.child('access').child($id).child('ownerUid').val() === auth.uid",
+        ".read": "(auth != null && auth.uid === root.child('access').child($id).child('ownerUid').val()) || (auth != null && auth.uid === root.child('access').child($id).child('deviceUid').val())",
+        "telemetry": {
+          ".write": "auth != null && auth.uid === root.child('access').child($id).child('deviceUid').val() && newData.exists()",
+          ".validate": "newData.hasChildren(['seq','receivedAt','servo_enabled','sensor_err','p_rain','measurement_age_s','line','mode'])",
+          "seq": {
+            ".validate": "newData.isNumber() && newData.val() >= 0 && newData.val() <= 4294967295"
+          },
+          "receivedAt": {
+            ".validate": "newData.isNumber() && newData.val() === now"
+          },
+          "servo_enabled": {
+            ".validate": "newData.isBoolean()"
+          },
+          "sensor_err": {
+            ".validate": "newData.isBoolean()"
+          },
+          "p_rain": {
+            ".validate": "newData.isNumber() && newData.val() >= 0 && newData.val() <= 1"
+          },
+          "measurement_age_s": {
+            ".validate": "newData.isNumber() && newData.val() >= 0 && newData.val() <= 4294967295"
+          },
+          "temp": {
+            ".validate": "newData.isNumber() && newData.val() >= -40 && newData.val() <= 85"
+          },
+          "hum": {
+            ".validate": "newData.isNumber() && newData.val() >= 0 && newData.val() <= 100"
+          },
+          "press": {
+            ".validate": "newData.isNumber() && newData.val() >= 300 && newData.val() <= 1100"
+          },
+          "lux": {
+            ".validate": "newData.isNumber() && newData.val() >= 0 && newData.val() <= 200000"
+          },
+          "line": {
+            ".validate": "newData.isString() && newData.val().length <= 24"
+          },
+          "mode": {
+            ".validate": "newData.val() === 'AUTO' || newData.val() === 'MANUAL'"
+          },
+          "retract_threshold": {
+            ".validate": "newData.isNumber() && newData.val() >= 0 && newData.val() <= 1"
+          },
+          "extend_threshold": {
+            ".validate": "newData.isNumber() && newData.val() >= 0 && newData.val() <= 1"
+          },
+          "fallback": {
+            ".validate": "newData.isBoolean()"
+          },
+          "rssi": {
+            ".validate": "newData.isNumber() && newData.val() >= -127 && newData.val() <= 0"
+          },
+          "uptime": {
+            ".validate": "newData.isNumber() && newData.val() >= 0 && newData.val() <= 4294967295"
+          },
+          "t": {
+            ".validate": "newData.isNumber() && newData.val() >= 0 && newData.val() <= 9999999999"
+          },
+          "fw": {
+            ".validate": "newData.isString() && newData.val().length <= 100"
+          },
+          "model": {
+            ".validate": "newData.isString() && newData.val().length <= 100"
+          },
+          "fault": {
+            ".validate": "newData.isString() && newData.val().length <= 200"
+          },
+          "v": {
+            ".validate": "newData.isNumber() && newData.val() >= 1 && newData.val() <= 1"
+          },
+          "next_in": {
+            ".validate": "newData.isNumber() && newData.val() >= 0 && newData.val() <= 4294967295"
+          },
+          "logCount": {
+            ".validate": "newData.isNumber() && newData.val() >= 0 && newData.val() <= 4294967295"
+          },
+          "demo": {
+            ".validate": "newData.isBoolean()"
+          },
+          "$other": {
+            ".validate": false
+          }
+        },
         "logs": {
           ".indexOn": [
             "epoch",
             "receivedAt"
-          ]
+          ],
+          "$seq": {
+            ".write": "auth != null && auth.uid === root.child('access').child($id).child('deviceUid').val() && newData.exists()",
+            ".validate": "$seq.matches(/^[0-9]{10}$/) && newData.hasChildren(['seq','epoch','uptime','p_rain','flags','line','receivedAt'])",
+            "seq": {
+              ".validate": "newData.isNumber() && newData.val() >= 1 && newData.val() <= 4294967295"
+            },
+            "epoch": {
+              ".validate": "newData.isNumber() && newData.val() >= 0 && newData.val() <= 9999999999"
+            },
+            "uptime": {
+              ".validate": "newData.isNumber() && newData.val() >= 0 && newData.val() <= 4294967295"
+            },
+            "p_rain": {
+              ".validate": "newData.isNumber() && newData.val() >= 0 && newData.val() <= 1"
+            },
+            "flags": {
+              ".validate": "newData.isNumber() && newData.val() >= 0 && newData.val() <= 255"
+            },
+            "line": {
+              ".validate": "newData.isString() && newData.val().length <= 24"
+            },
+            "receivedAt": {
+              ".validate": "newData.isNumber() && newData.val() === now"
+            },
+            "temp": {
+              ".validate": "newData.isNumber() && newData.val() >= -40 && newData.val() <= 85"
+            },
+            "hum": {
+              ".validate": "newData.isNumber() && newData.val() >= 0 && newData.val() <= 100"
+            },
+            "press": {
+              ".validate": "newData.isNumber() && newData.val() >= 300 && newData.val() <= 1100"
+            },
+            "lux": {
+              ".validate": "newData.isNumber() && newData.val() >= 0 && newData.val() <= 200000"
+            },
+            "$other": {
+              ".validate": false
+            }
+          }
         },
         "alerts": {
           ".indexOn": [
             "createdAt"
-          ]
+          ],
+          "$alert": {
+            ".write": "auth != null && auth.uid === root.child('access').child($id).child('deviceUid').val() && newData.exists()",
+            ".validate": "$alert.matches(/^rain-[0-9]{10}$/) && newData.hasChildren(['seq','p_rain','createdAt','fallback'])",
+            "seq": {
+              ".validate": "newData.isNumber() && newData.val() >= 1 && newData.val() <= 4294967295"
+            },
+            "p_rain": {
+              ".validate": "newData.isNumber() && newData.val() >= 0 && newData.val() <= 1"
+            },
+            "createdAt": {
+              ".validate": "newData.isNumber() && newData.val() >= 0 && newData.val() <= 9999999999000"
+            },
+            "fallback": {
+              ".validate": "newData.isBoolean()"
+            },
+            "$other": {
+              ".validate": false
+            }
+          }
+        },
+        "control": {
+          ".write": "auth != null && auth.uid === root.child('access').child($id).child('ownerUid').val() && newData.exists() && root.child('devices').child($id).child('telemetry').child('receivedAt').isNumber() && root.child('devices').child($id).child('telemetry').child('receivedAt').val() >= now - 30000 && (newData.child('action').val() === 'MEASURE' || root.child('devices').child($id).child('telemetry').child('servo_enabled').val() === true) && (!data.exists() || data.child('expiresAt').val() <= now || root.child('devices').child($id).child('acks').child(data.child('id').val()).exists() || newData.child('action').val() === 'STOP') && newData.child('id').val() !== data.child('id').val() && !root.child('devices').child($id).child('acks').child(newData.child('id').val()).exists()",
+          ".validate": "newData.hasChildren(['id','action','requestedBy','createdAt','expiresAt','status'])",
+          "id": {
+            ".validate": "newData.isString() && newData.val().matches(/^[-_a-zA-Z0-9]{20}$/)"
+          },
+          "action": {
+            ".validate": "newData.val() === 'MEASURE' || newData.val() === 'EXTEND' || newData.val() === 'RETRACT' || newData.val() === 'STOP' || newData.val() === 'MODE AUTO' || newData.val() === 'MODE MANUAL'"
+          },
+          "requestedBy": {
+            ".validate": "newData.val() === auth.uid"
+          },
+          "createdAt": {
+            ".validate": "newData.isNumber() && newData.val() === now"
+          },
+          "expiresAt": {
+            ".validate": "newData.isNumber() && newData.val() > now && newData.val() <= now + 30000"
+          },
+          "status": {
+            ".validate": "newData.val() === 'pending'"
+          },
+          "$other": {
+            ".validate": false
+          }
+        },
+        "acks": {
+          "$command": {
+            ".write": "auth != null && auth.uid === root.child('access').child($id).child('deviceUid').val() && newData.exists() && root.child('devices').child($id).child('control').child('id').val() === $command",
+            ".validate": "newData.hasChildren(['id','ok','msg','receivedAt']) && newData.child('id').val() === $command",
+            "id": {
+              ".validate": "newData.isString() && newData.val().length <= 20"
+            },
+            "ok": {
+              ".validate": "newData.isBoolean()"
+            },
+            "msg": {
+              ".validate": "newData.isString() && newData.val().length <= 200"
+            },
+            "receivedAt": {
+              ".validate": "newData.isNumber() && newData.val() === now"
+            },
+            "$other": {
+              ".validate": false
+            }
+          }
         }
       }
     },
@@ -25,24 +212,31 @@
         },
         "pushTokens": {
           ".read": "auth != null && auth.uid === $uid",
-          ".write": "auth != null && auth.uid === $uid",
-          "$token": {
-            ".validate": "newData.hasChildren(['token', 'createdAt'])",
+          "$key": {
+            ".write": "auth != null && auth.uid === $uid && (!newData.exists() || root.child('users').child($uid).child('devices').exists())",
+            ".validate": "$key.matches(/^[a-f0-9]{64}$/) && newData.hasChildren(['token', 'platform', 'updatedAt'])",
             "token": {
-              ".validate": "newData.isString() && newData.val().length > 10 && newData.val().length < 4096"
+              ".validate": "newData.isString() && newData.val().length >= 20 && newData.val().length <= 4096"
             },
-            "createdAt": {
-              ".validate": "newData.isNumber()"
+            "platform": {
+              ".validate": "newData.val() === 'web' || newData.val() === 'android' || newData.val() === 'iOS'"
+            },
+            "updatedAt": {
+              ".validate": "newData.isNumber() && newData.val() === now"
             },
             "$other": {
               ".validate": false
             }
-          },
-          ".indexOn": [
-            "createdAt"
-          ]
+          }
         }
       }
+    },
+    "pushDelivery": {
+      ".read": false,
+      ".write": false,
+      ".indexOn": [
+        "createdAt"
+      ]
     }
   }
 }

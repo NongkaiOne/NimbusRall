@@ -1,3 +1,4 @@
+// ภาพรวม: ทดสอบกฎข้อมูลของ Blaze เดิม โดยไม่ deploy หรือส่ง Push จริง
 const {test}=require("node:test");
 const assert=require("node:assert/strict");
 const d=require("../domain");

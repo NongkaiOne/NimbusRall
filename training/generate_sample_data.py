@@ -1,3 +1,4 @@
+# ภาพรวม: สร้าง CSV อากาศจำลองสำหรับทดลอง ไม่ใช่ผลวัดจริงจากเซ็นเซอร์
 import argparse,csv,math,random,time
 from pathlib import Path
 FIELDS='seq epoch temp_c hum_pct press_hpa lux p_rain line action flags rain_label rain_now uptime_s'.split()

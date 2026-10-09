@@ -1,31 +1,44 @@
+// ภาพรวม: หน้าจอ NimbusRail: เริ่ม Firebase ล็อกอิน/ตัวอย่าง สถานะ ประวัติ แจ้งเตือน และปุ่มควบคุม
 import 'dart:async';
 
 import 'package:firebase_core/firebase_core.dart';
 import 'package:firebase_auth/firebase_auth.dart';
-import 'package:firebase_messaging/firebase_messaging.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/foundation.dart';
+import 'package:firebase_messaging/firebase_messaging.dart';
+
+import 'firebase_options.dart';
+import 'push_notifications.dart';
+
 import 'package:flutter/services.dart';
 
 import 'models.dart';
 import 'repository.dart';
 
-@pragma('vm:entry-point')
-Future<void> onBackgroundMessage(RemoteMessage message) async {
-  await Firebase.initializeApp();
-}
-
+// เริ่ม Firebase ตามแพลตฟอร์ม ถ้ายังไม่ตั้งค่าหรือเปิด DEMO ให้ลองหน้าจอจำลองได้
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
+
   bool ready = false;
+
   if (!const bool.fromEnvironment('DEMO')) {
     try {
-      await Firebase.initializeApp();
-      FirebaseMessaging.onBackgroundMessage(onBackgroundMessage);
+      await Firebase.initializeApp(
+        options: DefaultFirebaseOptions.currentPlatform,
+      );
+
+      if (!kIsWeb) {
+        FirebaseMessaging.onBackgroundMessage(receiveBackgroundPush);
+      }
+
       ready = true;
-    } catch (_) {
-      /* Setup page keeps an unconfigured build usable. */
+      debugPrint('[FIREBASE] Initialized successfully');
+    } catch (e, stackTrace) {
+      debugPrint('[FIREBASE] Initialization failed: $e');
+      debugPrintStack(stackTrace: stackTrace);
     }
   }
+
   runApp(SmartLineApp(firebaseReady: ready));
 }
 
@@ -35,7 +48,7 @@ class SmartLineApp extends StatelessWidget {
   final DeviceRepository? repository;
   @override
   Widget build(BuildContext context) => MaterialApp(
-    title: 'NimbusRall',
+    title: 'NimbusRail',
     debugShowCheckedModeBanner: false,
     theme: ThemeData(
       useMaterial3: true,
@@ -55,6 +68,7 @@ class SmartLineApp extends StatelessWidget {
   );
 }
 
+// หน้าเริ่มต้น/ล็อกอิน ติดตามบัญชีปัจจุบันเพื่อเลือกแหล่งข้อมูล
 class EntryPage extends StatefulWidget {
   const EntryPage({super.key, required this.ready});
   final bool ready;
@@ -145,7 +159,7 @@ class _EntryPageState extends State<EntryPage> {
                   ),
                   const SizedBox(height: 20),
                   Text(
-                    'NimbusRall',
+                    'NimbusRail',
                     textAlign: TextAlign.center,
                     style: Theme.of(context).textTheme.headlineLarge,
                   ),
@@ -207,6 +221,7 @@ class _EntryPageState extends State<EntryPage> {
   }
 }
 
+// หน้าหลักอุปกรณ์: ภาพรวม บันทึก แจ้งเตือน และควบคุม
 class DeviceHome extends StatefulWidget {
   const DeviceHome({super.key, required this.repository, this.onExit});
   final DeviceRepository repository;
@@ -215,7 +230,7 @@ class DeviceHome extends StatefulWidget {
   State<DeviceHome> createState() => _DeviceHomeState();
 }
 
-class _DeviceHomeState extends State<DeviceHome> {
+class _DeviceHomeState extends State<DeviceHome> with WidgetsBindingObserver {
   DeviceRepository get repo => widget.repository;
   final List<StreamSubscription<dynamic>> _subs = [];
   final List<StreamSubscription<dynamic>> _deviceSubs = [];
@@ -223,7 +238,9 @@ class _DeviceHomeState extends State<DeviceHome> {
   Timer? _timer;
   Json _devices = {}, _state = {}, _control = {};
   List<Json> _logs = [], _alerts = [];
-  String? _id, _error, _notificationDevice;
+  String? _id, _error;
+  final _rainAlerts = ForegroundRainAlerts();
+  bool _foreground = true;
   bool _busy = false;
   int _page = 0, _limit = 100;
   DateTime _now = DateTime.now();
@@ -235,40 +252,18 @@ class _DeviceHomeState extends State<DeviceHome> {
       repo.devices().listen((devices) {
         if (!mounted) return;
         setState(() => _devices = devices);
-        if (_notificationDevice != null &&
-            devices.containsKey(_notificationDevice)) {
-          _select(_notificationDevice);
-          _notificationDevice = null;
-        } else if (!devices.containsKey(_id)) {
-          _select(devices.keys.firstOrNull);
-        }
+        if (!devices.containsKey(_id)) _select(devices.keys.firstOrNull);
       }, onError: _streamError),
     );
     _timer = Timer.periodic(const Duration(seconds: 1), (_) {
       if (mounted) setState(() => _now = DateTime.now());
     });
-    if (!repo.demo) {
-      _subs.add(
-        FirebaseMessaging.onMessage.listen((m) {
-          _notice(m.notification?.body ?? 'มีการแจ้งเตือนใหม่');
-        }),
-      );
-      _subs.add(FirebaseMessaging.onMessageOpenedApp.listen(_openNotification));
-      FirebaseMessaging.instance.getInitialMessage().then((m) {
-        if (mounted && m != null) _openNotification(m);
-      });
-    }
+    WidgetsBinding.instance.addObserver(this);
   }
 
-  void _openNotification(RemoteMessage m) {
-    if (!mounted) return;
-    final id = m.data['deviceId'];
-    if (_devices.containsKey(id)) {
-      _select(id);
-    } else {
-      _notificationDevice = id;
-    }
-    setState(() => _page = 2);
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    _foreground = state == AppLifecycleState.resumed;
   }
 
   void _streamError(Object error) {
@@ -279,6 +274,7 @@ class _DeviceHomeState extends State<DeviceHome> {
     }
   }
 
+  // ยกเลิก stream ของบอร์ดเดิม แล้วติดตามสถานะ/ACK/logs/alerts ของบอร์ดใหม่
   void _select(String? id) {
     for (final sub in _deviceSubs) {
       sub.cancel();
@@ -291,6 +287,7 @@ class _DeviceHomeState extends State<DeviceHome> {
       _control = {};
       _logs = [];
       _alerts = [];
+      _rainAlerts.reset();
       _error = null;
       _limit = 100;
     });
@@ -310,13 +307,17 @@ class _DeviceHomeState extends State<DeviceHome> {
           .listen((v) => update(() => _control = v), onError: _streamError),
     );
     _deviceSubs.add(
-      repo
-          .alerts(id)
-          .listen((v) => update(() => _alerts = v), onError: _streamError),
+      repo.alerts(id).listen((v) {
+        if (!mounted || _id != id) return;
+        final alert = _rainAlerts.observe(v, DateTime.now());
+        update(() => _alerts = v);
+        if (alert != null && _foreground) _notice(alertBody(alert));
+      }, onError: _streamError),
     );
     _loadLogs();
   }
 
+  // โหลด log ตามจำนวนที่เลือก ไม่ดึงประวัติทั้งหมดทุกครั้ง
   void _loadLogs() {
     _logSub?.cancel();
     final id = _id;
@@ -328,6 +329,7 @@ class _DeviceHomeState extends State<DeviceHome> {
 
   @override
   void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
     _timer?.cancel();
     _logSub?.cancel();
     for (final sub in [..._subs, ..._deviceSubs]) {
@@ -342,6 +344,7 @@ class _DeviceHomeState extends State<DeviceHome> {
     }
   }
 
+  // ส่งคำสั่งผ่าน repository และกันกดซ้ำระหว่างรอผลส่ง
   Future<void> _send(String action) async {
     final id = _id;
     if (_busy || id == null) return;
@@ -370,10 +373,10 @@ class _DeviceHomeState extends State<DeviceHome> {
     final online = state.onlineAt(_now);
     return Scaffold(
       appBar: AppBar(
-        title: const Text('NimbusRall'),
+        title: const Text('NimbusRail'),
         actions: [
           IconButton(
-            tooltip: 'เปิดแจ้งเตือนฝน',
+            tooltip: 'เปิด Push Notification',
             icon: const Icon(Icons.notifications_active_outlined),
             onPressed: () async {
               try {
@@ -523,6 +526,7 @@ class _DeviceHomeState extends State<DeviceHome> {
     );
   }
 
+  // แสดงค่าล่าสุดพร้อมความสด เพื่อไม่แสดงค่าที่เก่า/ผิดพลาดเป็นผลปัจจุบัน
   List<Widget> _dashboard(DeviceState state, bool online) {
     final p = _state['p_rain'];
     final valid = !state.sensorError && state.measurementFresh && p is num;
@@ -612,6 +616,7 @@ class _DeviceHomeState extends State<DeviceHome> {
     ];
   }
 
+  // แสดงประวัติและเปิดรายละเอียดแต่ละรอบวัด
   List<Widget> _history() => [
     _heading('บันทึกการวัด'),
     const Text('แตะรายการเพื่อดูรายละเอียด • ใหม่ที่สุดอยู่ด้านบน'),
@@ -669,10 +674,11 @@ class _DeviceHomeState extends State<DeviceHome> {
         child: const Text('ดูบันทึกเก่ากว่านี้'),
       ),
   ];
+  // แสดงประวัติ alert; Push เมื่อปิดหน้าใช้ FCM แยกจากรายการนี้
   List<Widget> _notifications() => [
     _heading('แจ้งเตือนฝน'),
     const Text(
-      'แจ้งเมื่อผลทำนายข้ามเกณฑ์ฝนตก กดไอคอนกระดิ่งด้านบนเพื่ออนุญาตแจ้งเตือนบนมือถือ',
+      'กดกระดิ่งเพื่อเปิด Push เมื่อไม่ได้เปิดแอพหรือหน้าเว็บ ต้องตั้งค่าตัวส่งแจ้งเตือนและอนุญาตสิทธิ์ก่อน ประวัติยังดูย้อนหลังได้',
     ),
     const SizedBox(height: 16),
     if (_alerts.isEmpty) _card(const Text('ยังไม่มีการแจ้งเตือน')),
@@ -683,11 +689,12 @@ class _DeviceHomeState extends State<DeviceHome> {
           leading: const Icon(Icons.umbrella_outlined),
           title: Text(alert['title'] as String? ?? 'มีแนวโน้มฝนตก'),
           subtitle: Text(
-            '${alert['body'] ?? ''}\n${dateText(alert['createdAt'])}',
+            '${alertBody(alert)}\n${dateText(alert['createdAt'])}',
           ),
         ),
       ),
   ];
+  // ปุ่มควบคุมพิจารณาโหมด สถานะออนไลน์ และการเปิดใช้ servo
   List<Widget> _controls(DeviceState state) {
     final can = state.canMove(_now) && !_busy;
     final pending =

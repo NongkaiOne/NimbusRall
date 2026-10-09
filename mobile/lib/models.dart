@@ -1,9 +1,11 @@
+// ภาพรวม: แปลข้อมูลเป็นสถานะ/ข้อความ และตรวจความสดของข้อมูลหรือ alert ที่เคยเห็นแล้ว
 typedef Json = Map<String, dynamic>;
 
 Json jsonMap(Object? value) => value is Map
     ? value.map((key, value) => MapEntry(key.toString(), value))
     : {};
 
+// ออนไลน์ดูเวลาที่เซิร์ฟเวอร์รับข้อมูล ส่วนความสดของผลวัดดู measurement_age_s แยกกัน
 class DeviceState {
   const DeviceState(this.data);
   final Json data;
@@ -42,6 +44,7 @@ String lineText(String value) => switch (value) {
   _ => 'ยังไม่ทราบตำแหน่งราว',
 };
 
+// แปลคำสั่ง/ACK เป็นข้อความ รวมหมดเวลาเมื่อไม่ได้รับผลทันกำหนด
 String commandText(Json c, DateTime now) {
   if (c.isEmpty) return 'ยังไม่มีคำสั่ง';
   final status = c['status'];
@@ -64,3 +67,44 @@ String rainText(Json row) {
   final p = row['p_rain'];
   return p is num ? '${numberText(p * 100, 0)}%' : '—';
 }
+
+// จำ alert ที่เห็น ข้ามประวัติครั้งแรก/ข้อมูลเก่า เพื่อเตือนเฉพาะผลใหม่ขณะเปิดแอพ
+class ForegroundRainAlerts {
+  final Set<String> _seen = {};
+  bool _initialized = false;
+  void reset() {
+    _seen.clear();
+    _initialized = false;
+  }
+
+  Json? observe(List<Json> rows, DateTime now) {
+    final fresh = rows
+        .where(
+          (row) => !_seen.contains(
+            '${row['key'] ?? row['seq'] ?? row['createdAt']}',
+          ),
+        )
+        .toList();
+    _seen
+      ..clear()
+      ..addAll(
+        rows.map((row) => '${row['key'] ?? row['seq'] ?? row['createdAt']}'),
+      );
+    if (!_initialized) {
+      _initialized = true;
+      return null;
+    }
+    for (final row in fresh) {
+      final time = row['createdAt'];
+      if (time is num) {
+        final age = now.millisecondsSinceEpoch - time;
+        if (age >= -5000 && age <= 300000) return row;
+      }
+    }
+    return null;
+  }
+}
+
+String alertBody(Json alert) =>
+    alert['body'] as String? ??
+    'โอกาสฝนตก ${numberText((alert['p_rain'] as num? ?? 0) * 100, 0)}% ตรวจสอบราวตากผ้า';

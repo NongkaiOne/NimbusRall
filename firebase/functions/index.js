@@ -1,3 +1,4 @@
+// ภาพรวม: Cloud Functions รุ่น Blaze เดิม เก็บอ้างอิง ระบบ Spark ปัจจุบันไม่เรียกหรือ deploy ไฟล์นี้
 "use strict";
 const {initializeApp}=require("firebase-admin/app");
 const {getDatabase}=require("firebase-admin/database");
@@ -14,6 +15,7 @@ const db=()=>getDatabase();
 const databaseTriggerRegion=process.env.FUNCTIONS_EMULATOR==="true"?"us-central1":"asia-southeast1";
 
 // Devices use a unique 256-bit bearer secret over verified HTTPS. Clients cannot read it.
+// ทาง HTTPS ของบอร์ดรุ่นเดิม ตรวจ device secret แล้วรับสถานะ/log/ACK
 exports.deviceSync=onRequest({invoker:"public",cors:false},async(req,res)=>{
   if(req.method!=="POST") return res.status(405).end();
   const body=req.body;
@@ -62,6 +64,7 @@ exports.deviceSync=onRequest({invoker:"public",cors:false},async(req,res)=>{
   }
 });
 
+// Callable ส่งคำสั่งรุ่นเดิม ปัจจุบัน Spark ใช้ Database Rules แทน
 exports.issueCommand=onCall(async(request)=>{
   if(!request.auth) throw new HttpsError("unauthenticated","Please sign in");
   const {deviceId,action}=request.data||{};
@@ -82,6 +85,7 @@ exports.issueCommand=onCall(async(request)=>{
 });
 
 // A deterministic alert ID prevents repeated heartbeats/retried events from duplicating alerts.
+// Trigger รุ่นเดิมสร้าง alert เมื่อ telemetry ข้ามเกณฑ์ฝน
 exports.detectRain=onValueWritten({region:databaseTriggerRegion,ref:"/devices/{deviceId}/telemetry",retry:true},async(event)=>{
   const before=event.data.before.val(),after=event.data.after.val();
   if(!domain.rainCandidate(before,after)) return;
@@ -90,6 +94,7 @@ exports.detectRain=onValueWritten({region:databaseTriggerRegion,ref:"/devices/{d
     body:`โอกาสฝนตก ${Math.round(after.p_rain*100)}% ตรวจสอบราวตากผ้า`};
   await db().ref(`devices/${event.params.deviceId}/alerts/${alert.id}`).transaction(current=>current?undefined:alert);
 });
+// Trigger ส่ง FCM รุ่นเดิม ปัจจุบัน Spark ใช้ firebase/push-sender แทน
 exports.sendRainPush=onValueCreated({region:databaseTriggerRegion,ref:"/devices/{deviceId}/alerts/{alertId}",retry:true},async(event)=>{
   const alert=event.data.val();
   const access=(await db().ref(`access/${event.params.deviceId}`).get()).val();

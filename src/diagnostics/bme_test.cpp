@@ -1,3 +1,4 @@
+// ภาพรวม: ทดสอบ BME280 โดยตรง; เมื่อเปิด BME_WIFI_TEST จะทดสอบ Wi-Fi ร่วมด้วย แต่ไม่เริ่ม servo
 #ifdef BME_STANDALONE_TEST
 #include <Arduino.h>
 #include <Wire.h>
@@ -36,6 +37,7 @@ static bool initBme() {
   return false;
 }
 
+// เตรียม Serial และอุปกรณ์เฉพาะชุดทดสอบนี้ ทำครั้งเดียวหลังบูต
 void setup() {
   Serial.begin(115200);
   delay(2000);
@@ -75,6 +77,7 @@ void setup() {
 #endif
 }
 
+// ทำงานทดสอบซ้ำและพิมพ์ผลใน Serial Monitor เพื่อดูค่าจริง/อาการผิดปกติ
 void loop() {
 #ifdef BME_WIFI_TEST
   uint32_t now = millis();

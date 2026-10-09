@@ -1,3 +1,4 @@
+# ภาพรวม: อ่าน COM3 และส่ง MEASURE ทุก 10 วินาทีภายในช่วงทดสอบ 45 วินาที แล้วบันทึกข้อความ
 """Capture the current-input model without setting a clock; request manual samples."""
 import time
 from pathlib import Path

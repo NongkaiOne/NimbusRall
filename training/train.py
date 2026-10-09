@@ -1,3 +1,4 @@
+# ภาพรวม: ฝึก Logistic Regression แบ่งข้อมูลตามเวลา ประเมินผล และส่งออกโมเดล JSON ไม่เกิน 4 KB
 import argparse,json,warnings
 from pathlib import Path
 from datetime import datetime,timezone
@@ -14,6 +15,7 @@ def metrics(y,p,t):
                 confusion_matrix=confusion_matrix(y,p>=t).tolist(),
                 reliability=[a.tolist() for a in calibration_curve(y,p,n_bins=10)])
 
+# เตรียมข้อมูล ฝึก ประเมิน และเขียนโมเดล/รายงานตามตัวเลือก
 def main():
     ap=argparse.ArgumentParser();ap.add_argument('--history',required=True);ap.add_argument('--light')
     ap.add_argument('--device-log');ap.add_argument('--horizon',type=int,default=2)
@@ -26,16 +28,19 @@ def main():
     x=x[selected]
     y=future_labels((df.precipitation>=a.rain_mm).astype(float),a.horizon)
     valid=y.notna() & np.isfinite(x).all(axis=1);x=x[valid];y=y[valid].astype(int)
+    # แบ่งชุดตามเวลาและเว้นขอบตาม horizon เพื่อกันคำตอบข้ามชุดข้อมูล
     train=x.index<pd.Timestamp('2024-01-01')-pd.Timedelta(hours=a.horizon)
     val=(x.index>=pd.Timestamp('2024-01-01')) & (x.index<pd.Timestamp('2025-01-01')-pd.Timedelta(hours=a.horizon))
     test=x.index>=pd.Timestamp('2025-01-01')
     if not all([train.any(),val.any(),test.any()]): raise ValueError('Need train before 2024, validation 2024, test 2025+')
+    # เรียนรู้ mean/scale จาก train เท่านั้น แล้วฝึก Logistic Regression
     scaler=StandardScaler().fit(x[train]);z=scaler.transform(x)
     model=LogisticRegression(class_weight='balanced',max_iter=2000,C=.5).fit(z[train],y[train])
     report={'split':'train < 2024; validation 2024; test >= 2025; horizon purged at boundaries',
             'rows':{'train':int(train.sum()),'validation':int(val.sum()),'test':int(test.sum())},
             'features':selected,'input_mode':'current' if a.snapshot else 'history','proxy_lux':'shortwave_radiation * 120; calibrate with BH1750',
             'device_warning':'No device calibration; reanalysis is not backyard sensor data.'}
+    # หากมี log ติดป้ายพอ ใช้ปรับกับหน้างาน โดยกันข้อมูลช่วงท้ายไว้ประเมิน
     if a.device_log:
         d=pd.read_csv(a.device_log)
         if 'deviceId' in d and d.deviceId.nunique()>1: raise ValueError('Use logs from one device')
@@ -56,6 +61,7 @@ def main():
                 report['device_warning']='Weighted x3; final 20% device data held out with horizon purge.'
             else: warnings.warn('Single class device labels; no adaptation')
         else: warnings.warn('Need >=4 weeks of valid labeled device data; no adaptation')
+    # เลือก threshold จาก validation แล้วรายงานผลบน test ที่แยกไว้
     p=model.predict_proba(z[val])[:,1];precision,recall,thresholds=precision_recall_curve(y[val],p)
     candidates=np.where(recall[:-1]>=.85)[0];idx=candidates[np.argmax(thresholds[candidates])]
     threshold=float(thresholds[idx])
@@ -67,6 +73,7 @@ def main():
               rain_mm=a.rain_mm,features=FEATURES,mean=scaler.mean_.tolist(),scale=scaler.scale_.tolist(),
               coef=model.coef_[0].tolist(),intercept=float(model.intercept_[0]),threshold_suggest=threshold,
               trained_at=datetime.now(timezone.utc).isoformat(),uses_rain_now=False)
+    # snapshot ใช้ 6 feature ปัจจุบัน คงรูปแบบ 16 ตัวโดยให้น้ำหนักส่วนที่เหลือเป็นศูนย์
     if a.snapshot:
         # Keep the firmware vector format, with unused inputs provably inactive.
         data['input_mode']='current'

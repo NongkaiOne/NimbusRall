@@ -1,6 +1,9 @@
+// ภาพรวม: สร้าง JSON สถานะและผลตอบรับคำสั่ง (ACK) รูปแบบร่วมของ MQTT และ Firebase
 #include "app.h"
 #include <WiFi.h>
+// ตอบรับหรือปฏิเสธคำสั่งพร้อมเหตุผล ไม่ใช่การยืนยันตำแหน่งทางกายภาพของราว
 void ack(const String& cmd,bool ok,const String& msg){cJSON* j=cJSON_CreateObject();cJSON_AddStringToObject(j,"cmd",cmd.c_str());cJSON_AddBoolToObject(j,"ok",ok);cJSON_AddStringToObject(j,"msg",msg.c_str());String s=jsonText(j);Serial.println(s);publish("ack",s);cJSON_Delete(j);}
+// รวมค่าล่าสุด ฝน โหมด fault ความสด และ servo_enabled ให้แอพแสดงผล
 String statusPayload(){
   cJSON* j=cJSON_CreateObject();cJSON_AddNumberToObject(j,"v",1);cJSON_AddNumberToObject(j,"t",epochNow());
   cJSON_AddNumberToObject(j,"temp",current.temp);cJSON_AddNumberToObject(j,"hum",current.hum);cJSON_AddNumberToObject(j,"press",current.press);cJSON_AddNumberToObject(j,"lux",current.lux);

@@ -1,3 +1,4 @@
+// ภาพรวม: กฎตรวจข้อมูล/คำสั่ง/เหตุการณ์ฝนของ Blaze รุ่นเดิม แยกไว้ให้ทดสอบโดยไม่เรียก Firebase
 "use strict";
 const ACTIONS = new Set(["MEASURE", "EXTEND", "RETRACT", "STOP", "MODE AUTO", "MODE MANUAL"]);
 const DEVICE_ID = /^sl-[a-f0-9]{6}$/;

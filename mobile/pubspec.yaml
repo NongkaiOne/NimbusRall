@@ -1,5 +1,5 @@
 name: smartline_app
-description: "NimbusRall clothesline monitoring and control with Firebase."
+description: "NimbusRail clothesline monitoring and control with Firebase."
 # The following line prevents the package from being accidentally published to
 # pub.dev using `flutter pub publish`. This is preferred for private packages.
 publish_to: 'none' # Remove this line if you wish to publish to pub.dev
@@ -37,10 +37,8 @@ dependencies:
   firebase_core: ^4.15.0
   firebase_auth: ^6.7.0
   firebase_database: ^12.6.0
-  cloud_functions: ^6.5.0
   firebase_messaging: ^16.7.0
   crypto: ^3.0.7
-
 dev_dependencies:
   flutter_test:
     sdk: flutter

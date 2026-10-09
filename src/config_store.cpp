@@ -1,6 +1,8 @@
+// ภาพรวม: ตรวจค่าตั้งและโหลด/บันทึกลง NVS เพื่อรักษาค่าหลังรีสตาร์ต
 #include "app.h"
 static const char* keys[]={"interval_s","retract_threshold","extend_threshold","daylight_lux_min","manual_timeout_s","motor_timeout_s","heartbeat_s"};
 static float* values[]={&settings.interval_s,&settings.retract_threshold,&settings.extend_threshold,&settings.daylight_lux_min,&settings.manual_timeout_s,&settings.motor_timeout_s,&settings.heartbeat_s};
+// ตรวจช่วงค่า โดยเกณฑ์กางต้องต่ำกว่าเกณฑ์เก็บเพื่อไม่สลับไปมาง่าย
 bool configSet(const String& key,float v){
   if(!isfinite(v))return false;
   for(int i=0;i<7;i++)if(key==keys[i]){
@@ -9,7 +11,9 @@ bool configSet(const String& key,float v){
     if(ok)*values[i]=v;return ok;
   }return false;
 }
+// บันทึก Settings ทั้งชุดลง NVS เมื่อสั่ง SAVE
 bool configSave(){return prefs.putBytes("config",&settings,sizeof(settings))==sizeof(settings);}
+// โหลดข้อมูลที่ขนาดตรงกัน และให้ configSet ตรวจค่าแต่ละตัวอีกครั้ง
 void configLoad(){
   if(prefs.getBytesLength("config")!=sizeof(settings))return;
   Settings s;prefs.getBytes("config",&s,sizeof(s));float v[]={s.interval_s,s.retract_threshold,s.extend_threshold,s.daylight_lux_min,s.manual_timeout_s,s.motor_timeout_s,s.heartbeat_s};

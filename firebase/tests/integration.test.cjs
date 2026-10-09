@@ -1,63 +1,48 @@
+// ภาพรวม: ทดสอบ Auth และ REST Database ครบเส้นทางด้วย Emulator รวมข้อมูล คำสั่ง และ ACK
 const {test,after}=require("node:test");
 const assert=require("node:assert/strict");
-const {randomBytes,createHash}=require("node:crypto");
+const {readFileSync}=require("node:fs");
 const {initializeTestEnvironment}=require("@firebase/rules-unit-testing");
-const {initializeApp,deleteApp}=require("firebase/app");
-const {getAuth,connectAuthEmulator,createUserWithEmailAndPassword}=require("firebase/auth");
-const {getFunctions,connectFunctionsEmulator,httpsCallable}=require("firebase/functions");
 const {ref,set,get}=require("firebase/database");
-let env,app;
-const databaseURL=JSON.parse(process.env.FIREBASE_CONFIG||"{}").databaseURL||"https://demo-smartline.firebaseio.com";
-after(async()=>{await env?.cleanup();if(app)await deleteApp(app);});
-test("device HTTPS sync, owner commands, acknowledgement and rain crossing",async()=>{
- env=await initializeTestEnvironment({projectId:"demo-smartline",database:{host:"127.0.0.1",port:9000}});
- app=initializeApp({projectId:"demo-smartline",apiKey:"demo-key",authDomain:"demo-smartline.firebaseapp.com"});
- const auth=getAuth(app);connectAuthEmulator(auth,"http://127.0.0.1:9099",{disableWarnings:true});
- const user=(await createUserWithEmailAndPassword(auth,"owner@example.com","test-password-123")).user;
- const fn=getFunctions(app,"asia-southeast1");connectFunctionsEmulator(fn,"127.0.0.1",5001);
- const command=httpsCallable(fn,"issueCommand");
- const secret=randomBytes(32).toString("hex"),deviceId="sl-aabbcc";
- await env.withSecurityRulesDisabled(c=>set(ref(c.database(databaseURL),`access/${deviceId}`),
-  {ownerUid:user.uid,secretHash:createHash("sha256").update(secret).digest("hex")}));
- const status={temp:30,hum:80,press:1000,lux:120,p_rain:.2,seq:1,uptime:10,t:1900000000,
-  measurement_age_s:0,retract_threshold:.7,extend_threshold:.2,rssi:-51,sensor_err:false,
-  fallback:false,servo_enabled:false,line:"UNKNOWN",mode:"MANUAL",model:"test",fw:"test"};
- const log={seq:1,epoch:1900000000,uptime:10,p_rain:.2,flags:0,temp:30,hum:80,press:1000,lux:120,line:"UNKNOWN"};
- const endpoint="http://127.0.0.1:5001/demo-smartline/asia-southeast1/deviceSync";
- async function sync(telemetry=status,extra={},key=secret) {
-  return fetch(endpoint,{method:"POST",headers:{"Content-Type":"application/json",Authorization:`Bearer ${key}`},
-   body:JSON.stringify({deviceId,telemetry,logs:[log],...extra})});
+let env;
+after(async()=>{await env?.cleanup();});
+test("Spark REST: device sign-in, token refresh, rules-protected sync, command and ACK without Functions",async()=>{
+ env=await initializeTestEnvironment({projectId:"demo-smartline",database:{host:"127.0.0.1",port:9000,rules:readFileSync("database.rules.json","utf8")}});
+ const authRoot="http://127.0.0.1:9099/identitytoolkit.googleapis.com/v1/accounts:";
+ async function auth(method,email,password){
+  const response=await fetch(authRoot+method+"?key=demo-key",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({email,password,returnSecureToken:true})});
+  assert.equal(response.status,200);return response.json();
  }
- assert.equal((await sync(status,{},"a".repeat(64))).status,401);
- let response=await sync();assert.equal(response.status,200);assert.equal((await response.json()).logAck,1);
- await assert.rejects(command({deviceId,action:"EXTEND"}),e=>e.code==="functions/failed-precondition");
- await assert.rejects(command({deviceId:"sl-dddddd",action:"MEASURE"}),e=>e.code==="functions/permission-denied");
- const issued=(await command({deviceId,action:"MEASURE"})).data;
- await assert.rejects(command({deviceId,action:"MEASURE"}),e=>e.code==="functions/aborted");
- response=await sync();assert.equal((await response.json()).command.id,issued.id);
- response=await sync(status,{ack:{id:issued.id,ok:true,msg:"accepted"}});
- assert.equal((await response.json()).command,null);
- let ackTime;
- await env.withSecurityRulesDisabled(async c=>{
-  const value=(await get(ref(c.database(databaseURL),`devices/${deviceId}/control`))).val();
-  assert.equal(value.status,"accepted");ackTime=value.ack.receivedAt;
-  assert.equal((await get(ref(c.database(databaseURL),`devices/${deviceId}/logs/0000000001`))).val().temp,30);
- });
- await sync(status,{ack:{id:issued.id,ok:true,msg:"accepted"}});
- await env.withSecurityRulesDisabled(async c=>{
-  assert.equal((await get(ref(c.database(databaseURL),`devices/${deviceId}/control/ack/receivedAt`))).val(),ackTime);
- });
- await sync({...status,seq:2,p_rain:.8});
- let alerts={};
- for(let i=0;i<30;i++){
-  await env.withSecurityRulesDisabled(async c=>{alerts=(await get(ref(c.database(databaseURL),`devices/${deviceId}/alerts`))).val()||{};});
-  if(alerts["rain-2"])break;
-  await new Promise(r=>setTimeout(r,200));
+ const password="test-only-password-123",owner=await auth("signUp","owner@example.com",password);
+ const device=await auth("signUp","device@example.com",password),stranger=await auth("signUp","stranger@example.com",password);
+ const signed=await auth("signInWithPassword","device@example.com",password);assert.equal(signed.localId,device.localId);
+ const refreshedResponse=await fetch("http://127.0.0.1:9099/securetoken.googleapis.com/v1/token?key=demo-key",{method:"POST",headers:{"Content-Type":"application/x-www-form-urlencoded"},body:new URLSearchParams({grant_type:"refresh_token",refresh_token:signed.refreshToken})});
+ assert.equal(refreshedResponse.status,200);const refreshed=await refreshedResponse.json();assert.equal(refreshed.user_id,device.localId);
+ const id="sl-aabbcc";
+ await env.withSecurityRulesDisabled(c=>set(ref(c.database(),"access/"+id),{ownerUid:owner.localId,deviceUid:device.localId}));
+ async function rest(path,method,token,body){
+  return fetch("http://127.0.0.1:9000/devices/"+id+path+".json?ns=demo-smartline&auth="+token,{method,headers:{"Content-Type":"application/json"},...(body===undefined?{}:{body:JSON.stringify(body)})});
  }
- assert.ok(alerts["rain-2"],"threshold crossing must create a durable alert");
- await sync({...status,seq:3,p_rain:.9});
- await new Promise(r=>setTimeout(r,400));
+ const now={".sv":"timestamp"};
+ const telemetry={seq:1,receivedAt:now,servo_enabled:false,sensor_err:false,p_rain:.8,measurement_age_s:0,line:"UNKNOWN",mode:"MANUAL"};
+ const changes={telemetry,"logs/0000000001":{seq:1,epoch:1,uptime:1,p_rain:.8,flags:0,line:"UNKNOWN",receivedAt:now,temp:30,hum:70,press:1000,lux:12},
+  "alerts/rain-0000000001":{seq:1,p_rain:.8,createdAt:Date.now(),fallback:false}};
+ assert.equal((await rest("","PATCH",refreshed.id_token,changes)).status,200);
+ assert.equal((await rest("/telemetry","GET",owner.idToken)).status,200);
+ assert.equal((await rest("/telemetry","GET",stranger.idToken)).status,401);
+ assert.equal((await rest("/telemetry","PUT",owner.idToken,telemetry)).status,401);
+ const command={id:"a".repeat(20),action:"MEASURE",requestedBy:owner.localId,createdAt:now,expiresAt:Date.now()+25000,status:"pending"};
+ assert.equal((await rest("/control","PUT",owner.idToken,{...command,action:"EXTEND"})).status,401);
+ assert.equal((await rest("/control","PUT",owner.idToken,command)).status,200);
+ assert.equal((await (await rest("/control","GET",refreshed.id_token)).json()).id,command.id);
+ const ack={id:command.id,ok:true,msg:"accepted",receivedAt:now};
+ assert.equal((await rest("/acks/"+command.id,"PUT",refreshed.id_token,ack)).status,200);
+ assert.equal((await (await rest("/acks/"+command.id,"GET",owner.idToken)).json()).ok,true);
+ // Re-sending the same batch after a lost HTTP response replaces keys, without duplicate logs/alerts.
+ assert.equal((await rest("","PATCH",refreshed.id_token,changes)).status,200);
+ for(const path of ["/logs","/alerts"])assert.equal(Object.keys(await (await rest(path,"GET",owner.idToken)).json()).length,1);
  await env.withSecurityRulesDisabled(async c=>{
-  assert.equal(Object.keys((await get(ref(c.database(databaseURL),`devices/${deviceId}/alerts`))).val()).length,1);
+  const stored=(await get(ref(c.database(),"devices/"+id+"/telemetry/receivedAt"))).val();
+  assert.equal(typeof stored,"number");assert.ok(Math.abs(stored-Date.now())<5000);
  });
 });
