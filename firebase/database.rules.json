@@ -1,0 +1,48 @@
+{
+  "rules": {
+    ".read": false,
+    ".write": false,
+    "devices": {
+      "$id": {
+        ".read": "auth != null && root.child('access').child($id).child('ownerUid').val() === auth.uid",
+        "logs": {
+          ".indexOn": [
+            "epoch",
+            "receivedAt"
+          ]
+        },
+        "alerts": {
+          ".indexOn": [
+            "createdAt"
+          ]
+        }
+      }
+    },
+    "users": {
+      "$uid": {
+        "devices": {
+          ".read": "auth != null && auth.uid === $uid"
+        },
+        "pushTokens": {
+          ".read": "auth != null && auth.uid === $uid",
+          ".write": "auth != null && auth.uid === $uid",
+          "$token": {
+            ".validate": "newData.hasChildren(['token', 'createdAt'])",
+            "token": {
+              ".validate": "newData.isString() && newData.val().length > 10 && newData.val().length < 4096"
+            },
+            "createdAt": {
+              ".validate": "newData.isNumber()"
+            },
+            "$other": {
+              ".validate": false
+            }
+          },
+          ".indexOn": [
+            "createdAt"
+          ]
+        }
+      }
+    }
+  }
+}

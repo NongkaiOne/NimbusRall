@@ -1,0 +1,15 @@
+{
+  "name": "smartline-firebase-tools",
+  "private": true,
+  "scripts": {
+    "test": "npm --prefix functions test",
+    "emulators": "firebase emulators:start --only auth,database,functions",
+    "test:rules": "firebase emulators:exec --project demo-smartline --only database \"node --test tests/rules.test.cjs\"",
+    "test:integration": "firebase emulators:exec --project demo-smartline --only auth,database,functions \"node --test tests/integration.test.cjs\""
+  },
+  "devDependencies": {
+    "firebase-tools": "15.33.0",
+    "@firebase/rules-unit-testing": "6.0.0",
+    "firebase": "13.0.0"
+  }
+}

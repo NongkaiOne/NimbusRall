@@ -1,4 +1,10 @@
 #include "app.h"
+#ifdef SMARTLINE_NO_SERVO
+void motorBegin(){lineState=UNKNOWN;}
+bool motorMove(bool){return false;}
+void motorStop(){lineState=UNKNOWN;}
+bool motorTick(){return false;}
+#else
 static int angle=90,target=90;static uint32_t startAt=0,stepAt=0;static bool attached=false;
 void motorBegin(){ledcSetup(7,50,16);lineState=UNKNOWN;}
 static void output(){if(!attached){ledcAttachPin(SERVO_PIN,7);attached=true;}ledcWrite(7,uint32_t((500+angle*2000.f/180)*65535/20000));}
@@ -17,3 +23,5 @@ bool motorTick(){
   if(angle<target)angle++;else if(angle>target)angle--;output();
   if(angle==target){lineState=target==SERVO_EXTEND_DEG?EXTENDED:RETRACTED;return true;}return false;
 }
+
+#endif

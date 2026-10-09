@@ -1,3 +1,4 @@
+#ifndef SMARTLINE_FIREBASE
 #include "app.h"
 #include <WiFi.h>
 #include <mqtt_client.h>
@@ -7,10 +8,16 @@
 #include "secrets.example.h"
 #endif
 static esp_mqtt_client_handle_t client=nullptr;
+static bool wifiWasConnected=false;
+#ifdef SMARTLINE_NO_SERVO
+static void diagnosticWiFiEvent(WiFiEvent_t event,WiFiEventInfo_t info){
+  if(event==ARDUINO_EVENT_WIFI_STA_DISCONNECTED)Serial.printf("[WIFI] Disconnected | reason %d\n",info.wifi_sta_disconnected.reason);
+}
+#endif
 static volatile bool online=false,announce=false,lost=false;
 struct Event {int kind,id;bool retain;char payload[4097];};
 static QueueHandle_t events=nullptr;static String incoming,topic;static bool retained=false;
-static uint32_t wifiAt=0,mqttAt=0,wifiBackoff=2000,mqttBackoff=2000;
+static uint32_t wifiAt=0,mqttAt=0,wifiBackoff=30000,mqttBackoff=2000;
 static uint32_t pubSeq=0,pendingSeq=0,backlogAt=0,pendingAt=0;static int pendingId=0;
 static bool stream=false;static uint32_t streamSeq=0,streamEnd=0,streamRows=0,streamCrc=0xffffffff,chunk=0;
 static int streamPending=0,streamStage=0;static String streamPayload;static uint32_t streamAt=0;
@@ -31,21 +38,29 @@ int publish(const char* suffix,const String& body,int qos,bool retain){
   if(!online||!client)return -1;
   return esp_mqtt_client_enqueue(client,(baseTopic+"/"+suffix).c_str(),body.c_str(),body.length(),qos,retain,true);
 }
-void ack(const String& cmd,bool ok,const String& msg){cJSON* j=cJSON_CreateObject();cJSON_AddStringToObject(j,"cmd",cmd.c_str());cJSON_AddBoolToObject(j,"ok",ok);cJSON_AddStringToObject(j,"msg",msg.c_str());String s=jsonText(j);Serial.println(s);publish("ack",s);cJSON_Delete(j);}
-void publishStatus(){
-  cJSON* j=cJSON_CreateObject();cJSON_AddNumberToObject(j,"v",1);cJSON_AddNumberToObject(j,"t",epochNow());
-  cJSON_AddNumberToObject(j,"temp",current.temp);cJSON_AddNumberToObject(j,"hum",current.hum);cJSON_AddNumberToObject(j,"press",current.press);cJSON_AddNumberToObject(j,"lux",current.lux);
-  cJSON_AddNumberToObject(j,"p_rain",probability);cJSON_AddStringToObject(j,"line",lineName(lineState));cJSON_AddStringToObject(j,"mode",autoMode?"AUTO":"MANUAL");
-  cJSON_AddStringToObject(j,"model",modelVersion().c_str());cJSON_AddBoolToObject(j,"fallback",fallback);cJSON_AddBoolToObject(j,"sensor_err",sensorError);
-  if(fault.length())cJSON_AddStringToObject(j,"fault",fault.c_str());else cJSON_AddNullToObject(j,"fault");
-  cJSON_AddNumberToObject(j,"next_in",due(millis(),nextMeasure)?0:(nextMeasure-millis())/1000);
-  cJSON_AddNumberToObject(j,"logCount",logCount());cJSON_AddNumberToObject(j,"seq",seqHigh);cJSON_AddNumberToObject(j,"rssi",WiFi.RSSI());
-  cJSON_AddNumberToObject(j,"uptime",millis()/1000);cJSON_AddStringToObject(j,"fw",FW_VERSION);cJSON_AddBoolToObject(j,"demo",SMARTLINE_SENSOR_DEMO);
-  String text=jsonText(j);publish("status",text,0,true);Serial.println(text);cJSON_Delete(j);
-}
 void networkBegin(){
   uint64_t mac=ESP.getEfuseMac();char id[16];snprintf(id,sizeof(id),"sl-%06lx",(unsigned long)((mac>>24)&0xffffff));deviceId=id;baseTopic=String(TOPIC_PREFIX)+"/"+deviceId;
-  events=xQueueCreate(8,sizeof(Event));WiFi.mode(WIFI_STA);WiFi.setAutoReconnect(false);pubSeq=prefs.getUInt("last_pub_seq",0);
+  events=xQueueCreate(8,sizeof(Event));
+  Serial.printf("[WIFI] Starting radio | SSID: %s | IP: pending\n",WIFI_SSID);Serial.flush();
+#ifdef SMARTLINE_NO_SERVO
+  WiFi.onEvent(diagnosticWiFiEvent);
+#endif
+  WiFi.persistent(false);WiFi.mode(WIFI_STA);WiFi.setAutoReconnect(false);
+#ifdef SMARTLINE_WIFI_TX_POWER
+  WiFi.disconnect(false);delay(100);
+  bool powerSet=WiFi.setTxPower(SMARTLINE_WIFI_TX_POWER);
+  Serial.printf("[WIFI] TX limit: %s | reported %.2f dBm\n",powerSet?"OK":"FAILED",int(WiFi.getTxPower())/4.0f);
+#endif
+#ifdef SMARTLINE_NO_SERVO
+  Serial.println("[WIFI] Scanning networks once");Serial.flush();
+  int networks=WiFi.scanNetworks();
+  Serial.printf("[WIFI] Scan result: %d (negative = error)\n",networks);
+  for(int i=0;i<networks;i++)Serial.printf("[WIFI] %s | RSSI %d dBm | CH %d\n",WiFi.SSID(i).c_str(),WiFi.RSSI(i),WiFi.channel(i));
+  WiFi.scanDelete();
+#endif
+  pubSeq=prefs.getUInt("last_pub_seq",0);
+  bool mqttConfigured=strlen(MQTT_PASSWORD)&&String(MQTT_URI).startsWith("mqtts://")&&strstr(MQTT_ROOT_CA,"PASTE_")==nullptr;
+  Serial.println(mqttConfigured?"[MQTT] Configured; waiting for Wi-Fi and time":"[MQTT] Not configured; Serial/local operation only");
   Serial.println("Device: "+deviceId);configTime(0,0,"pool.ntp.org","time.google.com");
 }
 void readlogStart(uint32_t since){stream=true;streamSeq=max(logOldest(),since+1);streamEnd=seqHigh;streamRows=0;chunk=0;streamCrc=0xffffffff;streamStage=0;streamPending=0;
@@ -68,10 +83,16 @@ static void streamTick(){
 }
 void networkTick(){
   uint32_t now=millis();
+  bool wifiConnected=WiFi.status()==WL_CONNECTED;
+  if(wifiConnected&&!wifiWasConnected)Serial.printf("[WIFI] Connected | SSID: %s | IP: %s | RSSI: %d dBm\n",WiFi.SSID().c_str(),WiFi.localIP().toString().c_str(),WiFi.RSSI());
+  if(!wifiConnected&&wifiWasConnected)Serial.println("[WIFI] Connection lost | IP unavailable");
+  wifiWasConnected=wifiConnected;
   if(strlen(WIFI_SSID)&&WiFi.status()!=WL_CONNECTED&&due(now,wifiAt)){
+    // Allow a full connection attempt before restarting the radio connection.
+    Serial.printf("[WIFI] Connecting to %s (30 s minimum retry interval)\n",WIFI_SSID);
     WiFi.begin(WIFI_SSID,WIFI_PASSWORD);wifiAt=now+wifiBackoff;wifiBackoff=min(60000u,wifiBackoff*2);
   }
-  if(WiFi.status()==WL_CONNECTED){wifiBackoff=2000;
+  if(WiFi.status()==WL_CONNECTED){wifiBackoff=30000;wifiAt=now+wifiBackoff;
     if(!client&&epochNow()&&strlen(MQTT_PASSWORD)&&String(MQTT_URI).startsWith("mqtts://")&&strstr(MQTT_ROOT_CA,"PASTE_")==nullptr){
       esp_mqtt_client_config_t cfg={};cfg.uri=MQTT_URI;cfg.username=MQTT_USERNAME;cfg.password=MQTT_PASSWORD;cfg.cert_pem=MQTT_ROOT_CA;
       cfg.client_id=deviceId.c_str();static String will;will=baseTopic+"/availability";cfg.lwt_topic=will.c_str();cfg.lwt_msg="offline";cfg.lwt_qos=1;cfg.lwt_retain=1;
@@ -99,3 +120,5 @@ void networkTick(){
   }
   streamTick();
 }
+
+#endif

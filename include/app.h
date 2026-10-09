@@ -36,3 +36,5 @@ void networkBegin();void networkTick();bool connected();int publish(const char* 
 void publishStatus();void publishConfig();void ack(const String& cmd,bool ok,const String& msg);
 void processCommand(String cmd);void readlogStart(uint32_t since);void readlogCancel();bool readlogBusy();
 void configLoad();bool configSet(const String& key,float value);bool configSave();
+
+String statusPayload();

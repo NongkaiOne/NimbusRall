@@ -15,3 +15,19 @@ broker/data/
 .vscode/c_cpp_properties.json
 .vscode/launch.json
 .vscode/ipch
+
+# Firebase / Flutter local tooling and private device configuration
+.tools/
+**/node_modules/
+**/.dart_tool/
+**/build/
+**/.flutter-plugins*
+**/local.properties
+**/.firebase/
+**/*-debug.log
+firebase/.private/
+firebase/.firebaserc
+include/firebase_secrets.h
+mobile/android/app/google-services.json
+mobile/ios/Runner/GoogleService-Info.plist
+mobile/lib/firebase_options.dart

@@ -1,3 +1,5 @@
+> Android/iOS + Firebase: [Setup guide](docs/FIREBASE_SETUP.md) | [Flutter app](mobile/README.md)
+
 # Smart Clothesline (MQTT) — สถานีวัดอากาศ + ทำนายฝน + ราวตากผ้าอัตโนมัติ
 
 > **ระบบที่ทำในโปรเจกต์นี้: Servo demo** — ใช้เซอร์โว GPIO 13 ตาม PCB หมุน 15° ↔ 165° แทน DC motor/limit switch ตามคำขอ

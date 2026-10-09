@@ -1,5 +1,6 @@
 #include "app.h"
 #include <errno.h>
+#include <esp_system.h>
 Settings settings;Preferences prefs;Sample current;
 Line lineState=UNKNOWN;bool autoMode=true,fallback=true,sensorError=true;
 uint32_t nextMeasure=0,manualUntil=0,seqHigh=0;float probability=.1;
@@ -15,6 +16,11 @@ static bool sequenceNumber(const String& s,uint32_t& v){
 static void manual(){autoMode=false;manualUntil=millis()+uint32_t(settings.manual_timeout_s*1000);dryRounds=0;}
 void processCommand(String cmd){
   cmd.trim();bool ok=true;String msg="ok";
+#ifdef SMARTLINE_NO_SERVO
+  if(cmd=="EXTEND"||cmd=="RETRACT"){
+    ack(cmd,false,"servo disabled in this build");publishStatus();return;
+  }
+#endif
   if(cmd=="EXTEND"||cmd=="RETRACT"){manual();ok=motorMove(cmd=="EXTEND");if(ok)lastAction=cmd=="EXTEND"?4:3;msg=ok?"accepted (servo demo)":"retract first to initialize";}
   else if(cmd=="STOP"){manual();motorStop();}
   else if(cmd=="MODE AUTO"){autoMode=true;dryRounds=0;}
@@ -52,9 +58,27 @@ static void decide(){
   }else dryRounds=0;
 }
 void setup(){
-  Serial.begin(115200);prefs.begin("smartline",false);configLoad();motorBegin();storeBegin();predictorBegin();sensorsBegin();networkBegin();
+  Serial.begin(115200);delay(2000);
+  Serial.printf("[BOOT] Reset reason: %d (brownout=%d)\n", int(esp_reset_reason()), int(ESP_RST_BROWNOUT));
+  Serial.println("[BOOT] Loading settings");Serial.flush();
+  bool nvsOk=prefs.begin("smartline",false);
+  Serial.printf("[NVS] %s\n",nvsOk?"OK":"FAILED");
+  configLoad();motorBegin();
+#ifdef SMARTLINE_NO_SERVO
+  Serial.println("[SERVO] Disabled; PWM output compiled out");
+#endif
+  Serial.println("[BOOT] Mounting log storage");Serial.flush();
+  bool storageOk=storeBegin();
+  Serial.printf("[STORE] %s | records %lu\n",storageOk?"OK":"FAILED",(unsigned long)logCount());
+  predictorBegin();Serial.println("[MODEL] "+modelVersion());
+  Serial.println("[BOOT] Starting sensors");Serial.flush();sensorsBegin();
+  Serial.println("[BOOT] Starting network");Serial.flush();networkBegin();
   measureStart();measuring=true;nextMeasure=millis()+uint32_t(settings.interval_s*1000);
+#ifdef SMARTLINE_NO_SERVO
+  Serial.println("[READY] Full system, servo disabled. MEASURE via Serial or MQTT.");
+#else
   Serial.println("Smart Clothesline: RETRACT first; then MODE AUTO. Commands via Serial or MQTT.");
+#endif
 }
 void loop(){
   if(motorTick())publishStatus();networkTick();storeTick();
